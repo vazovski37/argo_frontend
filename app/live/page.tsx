@@ -2,9 +2,17 @@
 
 import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { useRouter } from "next/navigation";
-import { createClient } from "@/utils/supabase/client";
-import { useGeminiLive, Message, ToolHandlers } from "@/hooks/useGeminiLive";
-import { useGameProgress } from "@/hooks/useGameProgress";
+import { useAuth } from "@/contexts/AuthContext";
+import { useGeminiLive, ToolHandlers } from "@/hooks/useGeminiLive";
+import { useGameProgress } from "@/hooks/queries/useGameProgress";
+import { useAchievements } from "@/hooks/queries/useAchievements";
+import { useVisitedLocations } from "@/hooks/queries/useVisitedLocations";
+import { useLocations } from "@/hooks/queries/useLocations";
+import { useQuests, useUserQuests } from "@/hooks/queries/useQuests";
+import { useVisitLocation } from "@/hooks/mutations/useVisitLocation";
+import { useLearnPhrase } from "@/hooks/mutations/useLearnPhrase";
+import { useStartQuest } from "@/hooks/mutations/useQuestMutations";
+import { useUploadPhoto } from "@/hooks/mutations/usePhotoMutations";
 import { useMessageProcessor } from "@/hooks/useMessageProcessor";
 import { GameProgressBar } from "@/components/GameProgressBar";
 import { PhotoCapture } from "@/components/PhotoCapture";
@@ -24,13 +32,11 @@ interface AchievementNotification {
 
 export default function LivePage() {
   const router = useRouter();
-  const supabase = createClient();
+  const { user, isLoading: authLoading, isAuthenticated } = useAuth();
   const videoRef = useRef<HTMLVideoElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const videoFrameIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
-  const [user, setUser] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
   const [textInput, setTextInput] = useState("");
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
@@ -38,7 +44,69 @@ export default function LivePage() {
   const [showSidebar, setShowSidebar] = useState(true);
   const [achievementNotifications, setAchievementNotifications] = useState<AchievementNotification[]>([]);
 
-  // Show achievement notification - defined early since it's used by toolHandlers
+  // Query hooks for data fetching
+  const { data: gameProgress, isLoading: progressLoading } = useGameProgress(isAuthenticated);
+  const { data: achievementsData } = useAchievements(isAuthenticated);
+  const { data: visitedData } = useVisitedLocations(isAuthenticated);
+  const { data: locationsData } = useLocations();
+  const { data: questsData } = useQuests();
+  const { data: userQuestsData } = useUserQuests(isAuthenticated);
+
+  // Mutation hooks
+  const visitLocationMutation = useVisitLocation();
+  const learnPhraseMutation = useLearnPhrase();
+  const startQuestMutation = useStartQuest();
+  const uploadPhotoMutation = useUploadPhoto();
+
+  // Transform data for components
+  const achievements = useMemo(() => 
+    achievementsData?.achievements || [], 
+    [achievementsData]
+  );
+  
+  const userAchievements = useMemo(() => 
+    achievements.filter(a => a.earned).map(a => a.id),
+    [achievements]
+  );
+  
+  const locations = useMemo(() => 
+    locationsData?.locations || [],
+    [locationsData]
+  );
+  
+  const visitedLocationIds = useMemo(() => 
+    visitedData?.visits?.map(v => v.location_id) || [],
+    [visitedData]
+  );
+  
+  const quests = useMemo(() => 
+    questsData?.quests || [],
+    [questsData]
+  );
+  
+  const userQuests = useMemo(() => 
+    [...(userQuestsData?.active || []), ...(userQuestsData?.completed || [])],
+    [userQuestsData]
+  );
+
+  // Game state for components (transformed from API response)
+  const gameState = useMemo(() => {
+    if (!gameProgress) return null;
+    return {
+      totalXp: gameProgress.total_xp,
+      currentLevel: gameProgress.current_level,
+      currentRank: gameProgress.current_rank,
+      locationsVisited: gameProgress.locations_visited,
+      photosTaken: gameProgress.photos_taken,
+      questsCompleted: gameProgress.quests_completed,
+      achievementsEarned: gameProgress.achievements_earned || 0,
+      phrasesLearned: gameProgress.phrases_learned || [],
+      activeQuests: userQuestsData?.active?.map(q => q.quest?.name || '') || [],
+      completedAchievements: userAchievements,
+    };
+  }, [gameProgress, userQuestsData, userAchievements]);
+
+  // Show achievement notification
   const showAchievement = useCallback((achievement: AchievementNotification) => {
     setAchievementNotifications((prev) => [...prev, achievement]);
   }, []);
@@ -47,29 +115,57 @@ export default function LivePage() {
     setAchievementNotifications((prev) => prev.filter((a) => a.id !== id));
   }, []);
 
-  // Game progress hook
-  const {
-    gameState,
-    achievements,
-    userAchievements,
-    quests,
-    userQuests,
-    locations,
-    visitedLocationIds,
-    uploadPhoto,
-    visitLocation,
-    startQuest,
-    learnPhrase,
-    refreshProgress,
-  } = useGameProgress();
+  // Visit location handler
+  const handleVisitLocation = useCallback(async (locationId: string) => {
+    const result = await visitLocationMutation.mutateAsync({ locationId });
+    
+    // Show achievement notifications
+    if (result.new_achievements?.length > 0) {
+      result.new_achievements.forEach((ach: any) => {
+        const achievement = achievements.find(a => a.name === ach.name || a.id === ach.id);
+        if (achievement) {
+          showAchievement({
+            id: achievement.id,
+            name: achievement.name,
+            icon: achievement.icon,
+            xp: achievement.xp_reward,
+            isSecret: achievement.is_secret,
+          });
+        }
+      });
+    }
 
-  // Message processor to detect visits and phrases from conversation
+    return {
+      xpEarned: result.xp_earned,
+      newAchievements: result.new_achievements?.map((a: any) => a.name) || [],
+    };
+  }, [visitLocationMutation, achievements, showAchievement]);
+
+  // Learn phrase handler
+  const handleLearnPhrase = useCallback(async (phrase: string, meaning?: string) => {
+    await learnPhraseMutation.mutateAsync({ phrase, meaning });
+  }, [learnPhraseMutation]);
+
+  // Start quest handler
+  const handleStartQuest = useCallback(async (questId: string) => {
+    await startQuestMutation.mutateAsync(questId);
+  }, [startQuestMutation]);
+
+  // Message processor
   const { processMessage } = useMessageProcessor({
-    locations,
+    locations: locations.map(l => ({
+      id: l.id,
+      name: l.name,
+      nameKa: l.name_ka,
+      description: l.description,
+      category: l.category,
+      xpReward: l.xp_reward,
+      imageUrl: l.image_url,
+    })),
     visitedLocationIds,
     phrasesLearned: gameState?.phrasesLearned || [],
-    onVisitLocation: visitLocation,
-    onLearnPhrase: learnPhrase,
+    onVisitLocation: handleVisitLocation,
+    onLearnPhrase: handleLearnPhrase,
     onAchievementEarned: (achievement) => {
       showAchievement({
         id: achievement.id,
@@ -79,10 +175,18 @@ export default function LivePage() {
         isSecret: achievement.isSecret,
       });
     },
-    achievements,
+    achievements: achievements.map(a => ({
+      id: a.id,
+      name: a.name,
+      description: a.description,
+      icon: a.icon,
+      xpReward: a.xp_reward,
+      category: a.category,
+      isSecret: a.is_secret,
+    })),
   });
 
-  // Build custom context for AI about visited locations
+  // Build context for AI
   const visitedLocationsContext = useMemo(() => {
     if (!locations.length) return "";
     const visited = locations.filter(l => visitedLocationIds.includes(l.id));
@@ -101,43 +205,37 @@ When the user asks to learn Georgian, teach them a phrase and then call learn_ph
     `;
   }, [locations, visitedLocationIds]);
 
-  // Tool handlers for function calling - these update Supabase
+  // Tool handlers for Gemini
   const toolHandlers: ToolHandlers = useMemo(() => ({
     visit_location: async (args) => {
       console.log("[TOOL HANDLER] 📍 visit_location called:", args.location_name);
       
-      // Find the location by name (fuzzy match)
-      const locationName = args.location_name.toLowerCase();
       const location = locations.find(l => 
-        l.name.toLowerCase().includes(locationName) ||
-        locationName.includes(l.name.toLowerCase()) ||
-        (l.nameKa && l.nameKa.includes(locationName))
+        l.name.toLowerCase().includes(args.location_name.toLowerCase()) ||
+        args.location_name.toLowerCase().includes(l.name.toLowerCase())
       );
       
       if (!location) {
-        console.log("[TOOL HANDLER] ❌ Location not found:", args.location_name);
-        return { success: false, xp_earned: 0, message: `Location "${args.location_name}" not found in our database.` };
+        return { success: false, xp_earned: 0, message: `Location "${args.location_name}" not found.` };
       }
       
       if (visitedLocationIds.includes(location.id)) {
-        return { success: true, xp_earned: 0, message: `You've already visited ${location.name}! No additional XP awarded.` };
+        return { success: true, xp_earned: 0, message: `You've already visited ${location.name}!` };
       }
       
       try {
-        const result = await visitLocation(location.id);
-        console.log("[TOOL HANDLER] ✅ Location visited:", location.name, "XP:", result.xpEarned);
+        const result = await visitLocationMutation.mutateAsync({ locationId: location.id });
         
-        // Show achievement notifications
-        if (result.newAchievements.length > 0) {
-          result.newAchievements.forEach(name => {
-            const achievement = achievements.find(a => a.name === name);
+        if (result.new_achievements?.length > 0) {
+          result.new_achievements.forEach((ach: any) => {
+            const achievement = achievements.find(a => a.name === ach.name);
             if (achievement) {
               showAchievement({
                 id: achievement.id,
                 name: achievement.name,
                 icon: achievement.icon,
-                xp: achievement.xpReward,
-                isSecret: achievement.isSecret,
+                xp: achievement.xp_reward,
+                isSecret: achievement.is_secret,
               });
             }
           });
@@ -145,12 +243,11 @@ When the user asks to learn Georgian, teach them a phrase and then call learn_ph
         
         return { 
           success: true, 
-          xp_earned: result.xpEarned, 
-          message: `Successfully recorded visit to ${location.name}! Earned ${result.xpEarned} XP.${result.newAchievements.length > 0 ? ` New achievements: ${result.newAchievements.join(", ")}` : ""}` 
+          xp_earned: result.xp_earned, 
+          message: result.message,
         };
       } catch (err) {
-        console.error("[TOOL HANDLER] ❌ Error visiting location:", err);
-        return { success: false, xp_earned: 0, message: "Failed to record visit. Please try again." };
+        return { success: false, xp_earned: 0, message: "Failed to record visit." };
       }
     },
     
@@ -162,42 +259,43 @@ When the user asks to learn Georgian, teach them a phrase and then call learn_ph
       }
       
       try {
-        await learnPhrase(args.phrase);
-        console.log("[TOOL HANDLER] ✅ Phrase learned:", args.phrase);
-        return { success: true, xp_earned: 15, message: `Great job learning "${args.phrase}" (${args.meaning})! Earned 15 XP.` };
+        const result = await learnPhraseMutation.mutateAsync({ phrase: args.phrase, meaning: args.meaning });
+        return { 
+          success: result.success, 
+          xp_earned: result.xp_earned || 10, 
+          message: `Great job learning "${args.phrase}"! Earned ${result.xp_earned || 10} XP.` 
+        };
       } catch (err) {
-        console.error("[TOOL HANDLER] ❌ Error learning phrase:", err);
-        return { success: false, xp_earned: 0, message: "Failed to save phrase. Please try again." };
+        return { success: false, xp_earned: 0, message: "Failed to save phrase." };
       }
     },
     
     start_quest: async (args) => {
       console.log("[TOOL HANDLER] 📜 start_quest called:", args.quest_name);
       
-      const questName = args.quest_name.toLowerCase();
-      const quest = quests.find(q => q.name.toLowerCase().includes(questName) || questName.includes(q.name.toLowerCase()));
+      const quest = quests.find(q => 
+        q.name.toLowerCase().includes(args.quest_name.toLowerCase()) || 
+        args.quest_name.toLowerCase().includes(q.name.toLowerCase())
+      );
       
       if (!quest) {
         return { success: false, message: `Quest "${args.quest_name}" not found.` };
       }
       
-      const existingQuest = userQuests.find(uq => uq.questId === quest.id);
+      const existingQuest = userQuests.find(uq => uq.quest_id === quest.id);
       if (existingQuest) {
         return { success: true, message: `You've already ${existingQuest.status === 'completed' ? 'completed' : 'started'} "${quest.name}".` };
       }
       
       try {
-        await startQuest(quest.id);
-        console.log("[TOOL HANDLER] ✅ Quest started:", quest.name);
-        return { success: true, message: `Quest "${quest.name}" has begun! ${quest.storyIntro || ''}` };
+        await startQuestMutation.mutateAsync(quest.id);
+        return { success: true, message: `Quest "${quest.name}" has begun! ${quest.story_intro || ''}` };
       } catch (err) {
-        console.error("[TOOL HANDLER] ❌ Error starting quest:", err);
-        return { success: false, message: "Failed to start quest. Please try again." };
+        return { success: false, message: "Failed to start quest." };
       }
     },
     
     get_user_progress: async () => {
-      console.log("[TOOL HANDLER] 📊 get_user_progress called");
       return {
         level: gameState?.currentLevel || 1,
         xp: gameState?.totalXp || 0,
@@ -209,9 +307,45 @@ When the user asks to learn Georgian, teach them a phrase and then call learn_ph
         phrases_learned: gameState?.phrasesLearned.length || 0,
       };
     },
-  }), [locations, visitedLocationIds, visitLocation, learnPhrase, startQuest, quests, userQuests, gameState, achievements, showAchievement]);
+    
+    get_knowledge: async (args) => {
+      console.log("[TOOL HANDLER] 📚 get_knowledge called:", args.query);
+      
+      try {
+        const response = await fetch("/api/rag/context", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ query: args.query, max_chunks: 5 }),
+        });
+        
+        if (!response.ok) {
+          console.error("[TOOL HANDLER] ❌ RAG query failed:", response.status);
+          return { found: false, context: "", sources: [] };
+        }
+        
+        const data = await response.json();
+        console.log("[TOOL HANDLER] 📖 RAG context received, source:", data.source);
+        
+        // Extract source names from the context
+        const sourceMatches = data.context.match(/\*\*Source \d+\*\* \(([^)]+)\)/g) || [];
+        const sources = sourceMatches.map((m: string) => {
+          const match = m.match(/\(([^)]+)\)/);
+          return match ? match[1] : "Unknown";
+        });
+        
+        return {
+          found: data.context.length > 0,
+          context: data.context,
+          sources: sources,
+        };
+      } catch (error) {
+        console.error("[TOOL HANDLER] ❌ RAG query error:", error);
+        return { found: false, context: "", sources: [] };
+      }
+    },
+  }), [locations, visitedLocationIds, visitLocationMutation, learnPhraseMutation, startQuestMutation, quests, userQuests, gameState, achievements, showAchievement]);
 
-  // Gemini Live hook with game state and function calling
+  // Gemini Live hook
   const {
     isConnected,
     isConnecting,
@@ -247,46 +381,27 @@ When the user asks to learn Georgian, teach them a phrase and then call learn_ph
 
   // Check auth
   useEffect(() => {
-    const checkUser = async () => {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-      if (!user) {
-        router.push("/login");
-      } else {
-        setUser(user);
-        setLoading(false);
-      }
-    };
-    checkUser();
-  }, [router, supabase]);
+    if (!authLoading && !isAuthenticated) {
+      router.push("/login");
+    }
+  }, [authLoading, isAuthenticated, router]);
 
   // Attach media stream to video element
   useEffect(() => {
     if (mediaStream) {
       const videoTracks = mediaStream.getVideoTracks();
-      const audioTracks = mediaStream.getAudioTracks();
-      console.log("Media stream tracks:", {
-        video: videoTracks.length,
-        audio: audioTracks.length,
-        videoLabels: videoTracks.map((t) => t.label),
-        audioLabels: audioTracks.map((t) => t.label),
-      });
-
       setHasVideo(videoTracks.length > 0);
 
       if (videoRef.current && videoTracks.length > 0) {
         videoRef.current.srcObject = mediaStream;
-        videoRef.current.play().catch((e) => {
-          console.log("Video autoplay blocked, will play on interaction:", e);
-        });
+        videoRef.current.play().catch(() => {});
       }
     } else {
       setHasVideo(false);
     }
   }, [mediaStream]);
 
-  // Send video frames periodically when connected
+  // Send video frames periodically
   useEffect(() => {
     if (isConnected && isVideoEnabled && videoRef.current) {
       videoFrameIntervalRef.current = setInterval(() => {
@@ -308,30 +423,17 @@ When the user asks to learn Georgian, teach them a phrase and then call learn_ph
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  // Process messages for game events (visits, phrases, etc.)
+  // Process messages for game events
   const lastProcessedMessageRef = useRef<string | null>(null);
   useEffect(() => {
     const processNewMessages = async () => {
       if (messages.length === 0) return;
       
       const lastMessage = messages[messages.length - 1];
-      
-      // Skip if already processed
       if (lastProcessedMessageRef.current === lastMessage.id) return;
       lastProcessedMessageRef.current = lastMessage.id;
 
-      // Process the message
-      const result = await processMessage(lastMessage.content, lastMessage.role);
-      
-      if (result.xpEarned > 0) {
-        console.log(`[GAME] 🎮 Earned ${result.xpEarned} XP from conversation!`);
-        if (result.visitedLocation) {
-          console.log(`[GAME] 📍 Auto-checked into: ${result.visitedLocation.name}`);
-        }
-        if (result.learnedPhrase) {
-          console.log(`[GAME] 🗣️ Auto-learned phrase: ${result.learnedPhrase}`);
-        }
-      }
+      await processMessage(lastMessage.content, lastMessage.role);
     };
 
     processNewMessages();
@@ -339,9 +441,7 @@ When the user asks to learn Georgian, teach them a phrase and then call learn_ph
 
   const handleConnect = () => {
     if (!GEMINI_API_KEY) {
-      setError(
-        "Gemini API key is not configured. Please add NEXT_PUBLIC_GEMINI_API_KEY to your .env.local file."
-      );
+      setError("Gemini API key is not configured.");
       return;
     }
     setError("");
@@ -363,33 +463,18 @@ When the user asks to learn Georgian, teach them a phrase and then call learn_ph
     }
   };
 
-  // Handle photo capture
   const handlePhotoCapture = useCallback(
     async (file: File, type: "selfie" | "place" | "food" | "achievement") => {
       try {
-        const photo = await uploadPhoto(file, type);
-        console.log("Photo uploaded:", photo);
-
-        // Check for photo-related achievements
-        const photoAchievements = achievements.filter(
-          (a) =>
-            (a.slug === "first_photo" || a.slug === "photographer" || a.slug === "selfie_master") &&
-            !userAchievements.includes(a.id)
-        );
-
-        // Refresh to check for new achievements
-        await refreshProgress();
-
-        // Show XP notification
-        // Could add a toast here for "+10 XP"
+        await uploadPhotoMutation.mutateAsync({ file, isSelfie: type === "selfie" });
       } catch (error) {
         console.error("Error uploading photo:", error);
       }
     },
-    [uploadPhoto, achievements, userAchievements, refreshProgress]
+    [uploadPhotoMutation]
   );
 
-  if (loading) {
+  if (authLoading || progressLoading) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 flex items-center justify-center">
         <div className="w-8 h-8 border-2 border-purple-500 border-t-transparent rounded-full animate-spin"></div>
@@ -399,7 +484,52 @@ When the user asks to learn Georgian, teach them a phrase and then call learn_ph
 
   // Get active quest info
   const activeQuest = userQuests.find((uq) => uq.status === "active");
-  const activeQuestDef = activeQuest ? quests.find((q) => q.id === activeQuest.questId) : null;
+  const activeQuestDef = activeQuest ? quests.find((q) => q.id === activeQuest.quest_id) : null;
+
+  // Transform data for GameActions component
+  const achievementsForActions = achievements.map(a => ({
+    id: a.id,
+    slug: a.id,
+    name: a.name,
+    description: a.description,
+    icon: a.icon,
+    xpReward: a.xp_reward,
+    category: a.category,
+    isSecret: a.is_secret,
+  }));
+
+  const questsForActions = quests.map(q => ({
+    id: q.id,
+    slug: q.id,
+    name: q.name,
+    description: q.description,
+    storyIntro: q.story_intro || null,
+    questType: q.difficulty || 'normal',
+    xpReward: q.xp_reward,
+    steps: q.steps,
+    isActive: true,
+  }));
+
+  const userQuestsForActions = userQuests.map(uq => ({
+    id: uq.id,
+    questId: uq.quest_id,
+    status: uq.status,
+    currentStep: uq.current_step,
+    stepsCompleted: [],
+    startedAt: uq.started_at,
+    completedAt: uq.completed_at || null,
+    quest: uq.quest as any,
+  }));
+
+  const locationsForActions = locations.map(l => ({
+    id: l.id,
+    name: l.name,
+    nameKa: l.name_ka || null,
+    description: l.description || null,
+    category: l.category,
+    xpReward: l.xp_reward,
+    imageUrl: l.image_url || null,
+  }));
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900">
@@ -432,13 +562,11 @@ When the user asks to learn Georgian, teach them a phrase and then call learn_ph
             <span className="text-white font-semibold text-lg hidden sm:inline">Poti Guide</span>
           </Link>
 
-          {/* Game Progress in Header */}
           <div className="flex-1 max-w-xs mx-4 hidden md:block">
             <GameProgressBar gameState={gameState} compact />
           </div>
 
           <div className="flex items-center gap-3">
-            {/* Connection Status */}
             <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/5 border border-white/10">
               <div
                 className={`w-2 h-2 rounded-full ${
@@ -454,7 +582,6 @@ When the user asks to learn Georgian, teach them a phrase and then call learn_ph
               </span>
             </div>
 
-            {/* Toggle Sidebar */}
             <button
               onClick={() => setShowSidebar(!showSidebar)}
               className="p-2 rounded-lg bg-white/5 border border-white/10 text-white/70 hover:text-white hover:bg-white/10 transition-all lg:hidden"
@@ -464,13 +591,8 @@ When the user asks to learn Georgian, teach them a phrase and then call learn_ph
               </svg>
             </button>
 
-            {/* User Avatar */}
-            {user?.user_metadata?.avatar_url ? (
-              <img
-                src={user.user_metadata.avatar_url}
-                alt="Profile"
-                className="w-8 h-8 rounded-full ring-2 ring-purple-500/30"
-              />
+            {user?.avatar_url ? (
+              <img src={user.avatar_url} alt="Profile" className="w-8 h-8 rounded-full ring-2 ring-purple-500/30" />
             ) : (
               <div className="w-8 h-8 rounded-full bg-gradient-to-br from-violet-500 to-fuchsia-500 flex items-center justify-center text-white text-sm font-medium">
                 {user?.email?.charAt(0).toUpperCase()}
@@ -483,13 +605,12 @@ When the user asks to learn Georgian, teach them a phrase and then call learn_ph
       {/* Main Content */}
       <main className="relative z-10 max-w-7xl mx-auto px-4 py-4">
         <div className="flex gap-4 h-[calc(100vh-100px)]">
-          {/* Left Sidebar - Game Progress */}
+          {/* Left Sidebar */}
           <div
             className={`${
               showSidebar ? "block" : "hidden"
             } lg:block w-full lg:w-72 flex-shrink-0 space-y-4 absolute lg:relative inset-0 lg:inset-auto z-20 lg:z-auto bg-slate-900/95 lg:bg-transparent p-4 lg:p-0 overflow-y-auto`}
           >
-            {/* Close button for mobile */}
             <button
               onClick={() => setShowSidebar(false)}
               className="lg:hidden absolute top-4 right-4 p-2 rounded-lg bg-white/10 text-white"
@@ -499,10 +620,8 @@ When the user asks to learn Georgian, teach them a phrase and then call learn_ph
               </svg>
             </button>
 
-            {/* Full Progress Card */}
             <GameProgressBar gameState={gameState} />
 
-            {/* Active Quest */}
             {activeQuestDef && (
               <div className="backdrop-blur-xl bg-white/5 border border-white/10 rounded-2xl p-4">
                 <div className="flex items-center gap-2 mb-3">
@@ -511,32 +630,31 @@ When the user asks to learn Georgian, teach them a phrase and then call learn_ph
                 </div>
                 <p className="text-white text-sm font-medium">{activeQuestDef.name}</p>
                 <p className="text-slate-400 text-xs mt-1">
-                  Step {(activeQuest?.currentStep || 0) + 1} of {activeQuestDef.steps.length}
+                  Step {(activeQuest?.current_step || 0) + 1} of {activeQuestDef.steps.length}
                 </p>
                 <div className="mt-2 h-1.5 bg-white/10 rounded-full overflow-hidden">
                   <div
                     className="h-full bg-gradient-to-r from-amber-500 to-orange-500 rounded-full transition-all"
                     style={{
-                      width: `${((activeQuest?.currentStep || 0) / activeQuestDef.steps.length) * 100}%`,
+                      width: `${((activeQuest?.current_step || 0) / activeQuestDef.steps.length) * 100}%`,
                     }}
                   />
                 </div>
               </div>
             )}
 
-            {/* Game Actions Panel */}
             <div className="backdrop-blur-xl bg-white/5 border border-white/10 rounded-2xl overflow-hidden flex-1 min-h-0">
               <GameActions
-                locations={locations}
+                locations={locationsForActions}
                 visitedLocationIds={visitedLocationIds}
-                achievements={achievements}
+                achievements={achievementsForActions}
                 userAchievements={userAchievements}
-                quests={quests}
-                userQuests={userQuests}
+                quests={questsForActions}
+                userQuests={userQuestsForActions}
                 phrasesLearned={gameState?.phrasesLearned || []}
-                onVisitLocation={visitLocation}
-                onStartQuest={startQuest}
-                onLearnPhrase={learnPhrase}
+                onVisitLocation={handleVisitLocation}
+                onStartQuest={handleStartQuest}
+                onLearnPhrase={handleLearnPhrase}
                 onAchievementEarned={(achievement) => {
                   showAchievement({
                     id: achievement.id,
@@ -552,7 +670,6 @@ When the user asks to learn Georgian, teach them a phrase and then call learn_ph
 
           {/* Center - Video & Controls */}
           <div className="flex-1 flex flex-col gap-4 min-w-0">
-            {/* Video Container */}
             <div className="relative flex-1 backdrop-blur-xl bg-white/5 border border-white/10 rounded-3xl overflow-hidden">
               <video
                 ref={videoRef}
@@ -565,16 +682,13 @@ When the user asks to learn Georgian, teach them a phrase and then call learn_ph
               />
 
               {!isConnected && !isConnecting && !mediaStream ? (
-                /* Start Screen */
                 <div className="absolute inset-0 flex items-center justify-center p-8">
                   <div className="max-w-md w-full text-center">
                     <div className="w-24 h-24 mx-auto mb-6 rounded-2xl bg-gradient-to-br from-violet-500 to-fuchsia-500 flex items-center justify-center shadow-lg shadow-purple-500/30 animate-pulse-glow">
                       <span className="text-5xl">⚓</span>
                     </div>
                     <h2 className="text-2xl font-bold text-white mb-2">Welcome, {gameState?.currentRank || "Traveler"}!</h2>
-                    <p className="text-slate-400 mb-6">
-                      Start your adventure in Poti with your AI guide
-                    </p>
+                    <p className="text-slate-400 mb-6">Start your adventure in Poti with your AI guide</p>
 
                     {error && (
                       <div className="mb-4 p-3 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-sm">
@@ -591,13 +705,10 @@ When the user asks to learn Georgian, teach them a phrase and then call learn_ph
                       Start Adventure
                     </button>
 
-                    <p className="mt-4 text-xs text-slate-500">
-                      Camera and microphone access will be requested
-                    </p>
+                    <p className="mt-4 text-xs text-slate-500">Camera and microphone access will be requested</p>
                   </div>
                 </div>
               ) : isConnecting ? (
-                /* Connecting Screen */
                 <div className="absolute inset-0 flex items-center justify-center p-8 bg-black/50 backdrop-blur-sm">
                   <div className="text-center">
                     <div className="w-16 h-16 mx-auto mb-4 border-4 border-purple-500/30 border-t-purple-500 rounded-full animate-spin"></div>
@@ -606,7 +717,6 @@ When the user asks to learn Georgian, teach them a phrase and then call learn_ph
                   </div>
                 </div>
               ) : (
-                /* Connected - Video overlays */
                 <>
                   {(!isVideoEnabled || !hasVideo) && (
                     <div className="absolute inset-0 flex items-center justify-center bg-slate-900/50">
@@ -615,14 +725,11 @@ When the user asks to learn Georgian, teach them a phrase and then call learn_ph
                           <span className="text-4xl animate-bounce-slow">🎙️</span>
                         </div>
                         <p className="text-white font-medium">Listening...</p>
-                        <p className="text-slate-400 text-sm mt-1">
-                          {hasVideo ? "Camera is off" : "Audio-only mode"}
-                        </p>
+                        <p className="text-slate-400 text-sm mt-1">{hasVideo ? "Camera is off" : "Audio-only mode"}</p>
                       </div>
                     </div>
                   )}
 
-                  {/* Live indicator */}
                   {isConnected && (
                     <div className="absolute top-4 left-4 flex items-center gap-2 px-3 py-1.5 rounded-full bg-red-500/20 border border-red-500/30">
                       <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse"></div>
@@ -630,7 +737,6 @@ When the user asks to learn Georgian, teach them a phrase and then call learn_ph
                     </div>
                   )}
 
-                  {/* XP Display */}
                   {isConnected && gameState && (
                     <div className="absolute top-4 right-4 flex items-center gap-2 px-3 py-1.5 rounded-full bg-amber-500/20 border border-amber-500/30">
                       <span className="text-amber-400 font-bold text-sm">{gameState.totalXp} XP</span>
@@ -640,10 +746,8 @@ When the user asks to learn Georgian, teach them a phrase and then call learn_ph
               )}
             </div>
 
-            {/* Controls */}
             {isConnected && (
               <div className="flex items-center justify-center gap-3">
-                {/* Mute Button */}
                 <button
                   onClick={toggleMute}
                   className={`p-4 rounded-2xl transition-all duration-300 ${
@@ -654,27 +758,16 @@ When the user asks to learn Georgian, teach them a phrase and then call learn_ph
                 >
                   {isMuted ? (
                     <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z"
-                      />
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2" />
                     </svg>
                   ) : (
                     <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"
-                      />
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
                     </svg>
                   )}
                 </button>
 
-                {/* Video Toggle */}
                 <button
                   onClick={toggleVideo}
                   className={`p-4 rounded-2xl transition-all duration-300 ${
@@ -684,34 +777,15 @@ When the user asks to learn Georgian, teach them a phrase and then call learn_ph
                   }`}
                 >
                   <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"
-                    />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
                   </svg>
                 </button>
 
-                {/* Photo Capture */}
-                <PhotoCapture
-                  onCapture={handlePhotoCapture}
-                  videoStream={mediaStream}
-                  isCapturing={false}
-                />
+                <PhotoCapture onCapture={handlePhotoCapture} videoStream={mediaStream} isCapturing={false} />
 
-                {/* End Call */}
-                <button
-                  onClick={handleDisconnect}
-                  className="p-4 rounded-2xl bg-red-500 hover:bg-red-600 text-white transition-all duration-300"
-                >
+                <button onClick={handleDisconnect} className="p-4 rounded-2xl bg-red-500 hover:bg-red-600 text-white transition-all duration-300">
                   <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M16 8l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2M5 3a2 2 0 00-2 2v1c0 8.284 6.716 15 15 15h1a2 2 0 002-2v-3.28a1 1 0 00-.684-.948l-4.493-1.498a1 1 0 00-1.21.502l-1.13 2.257a11.042 11.042 0 01-5.516-5.517l2.257-1.128a1 1 0 00.502-1.21L9.228 3.683A1 1 0 008.279 3H5z"
-                    />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 8l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2M5 3a2 2 0 00-2 2v1c0 8.284 6.716 15 15 15h1a2 2 0 002-2v-3.28a1 1 0 00-.684-.948l-4.493-1.498a1 1 0 00-1.21.502l-1.13 2.257a11.042 11.042 0 01-5.516-5.517l2.257-1.128a1 1 0 00.502-1.21L9.228 3.683A1 1 0 008.279 3H5z" />
                   </svg>
                 </button>
               </div>
@@ -720,17 +794,13 @@ When the user asks to learn Georgian, teach them a phrase and then call learn_ph
 
           {/* Right - Chat Panel */}
           <div className="hidden lg:flex w-80 flex-shrink-0 flex-col backdrop-blur-xl bg-white/5 border border-white/10 rounded-3xl overflow-hidden">
-            {/* Chat Header */}
             <div className="px-4 py-3 border-b border-white/10">
               <h2 className="text-white font-semibold flex items-center gap-2">
                 <span>💬</span> Chat
               </h2>
-              <p className="text-xs text-slate-400">
-                {isConnected ? "Speak or type" : "Connect to chat"}
-              </p>
+              <p className="text-xs text-slate-400">{isConnected ? "Speak or type" : "Connect to chat"}</p>
             </div>
 
-            {/* Messages */}
             <div className="flex-1 overflow-y-auto p-3 space-y-3">
               {messages.length === 0 ? (
                 <div className="text-center py-8">
@@ -742,10 +812,7 @@ When the user asks to learn Georgian, teach them a phrase and then call learn_ph
                 </div>
               ) : (
                 messages.map((message) => (
-                  <div
-                    key={message.id}
-                    className={`flex ${message.role === "user" ? "justify-end" : "justify-start"}`}
-                  >
+                  <div key={message.id} className={`flex ${message.role === "user" ? "justify-end" : "justify-start"}`}>
                     <div
                       className={`max-w-[85%] px-3 py-2 rounded-2xl ${
                         message.role === "user"
@@ -754,15 +821,8 @@ When the user asks to learn Georgian, teach them a phrase and then call learn_ph
                       }`}
                     >
                       <p className="text-sm leading-relaxed">{message.content}</p>
-                      <p
-                        className={`text-xs mt-1 ${
-                          message.role === "user" ? "text-white/60" : "text-slate-500"
-                        }`}
-                      >
-                        {message.timestamp.toLocaleTimeString([], {
-                          hour: "2-digit",
-                          minute: "2-digit",
-                        })}
+                      <p className={`text-xs mt-1 ${message.role === "user" ? "text-white/60" : "text-slate-500"}`}>
+                        {message.timestamp.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
                       </p>
                     </div>
                   </div>
@@ -771,7 +831,6 @@ When the user asks to learn Georgian, teach them a phrase and then call learn_ph
               <div ref={messagesEndRef} />
             </div>
 
-            {/* Text Input */}
             {isConnected && (
               <form onSubmit={handleSendMessage} className="p-3 border-t border-white/10">
                 <div className="flex gap-2">
@@ -782,10 +841,7 @@ When the user asks to learn Georgian, teach them a phrase and then call learn_ph
                     placeholder="Type a message..."
                     className="flex-1 px-3 py-2 bg-white/10 border border-white/20 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-purple-500/50 focus:border-transparent text-sm"
                   />
-                  <button
-                    type="submit"
-                    className="px-3 py-2 bg-gradient-to-r from-violet-600 to-fuchsia-600 hover:from-violet-500 hover:to-fuchsia-500 text-white rounded-xl transition-all duration-300"
-                  >
+                  <button type="submit" className="px-3 py-2 bg-gradient-to-r from-violet-600 to-fuchsia-600 hover:from-violet-500 hover:to-fuchsia-500 text-white rounded-xl transition-all duration-300">
                     <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
                     </svg>

@@ -1,7 +1,51 @@
 "use client";
 
 import { useState, useCallback } from "react";
-import { Location, Achievement, Quest, UserQuest } from "@/hooks/useGameProgress";
+
+// Types for game entities
+export interface Location {
+  id: string;
+  name: string;
+  nameKa: string | null;
+  description: string | null;
+  category: string;
+  xpReward: number;
+  imageUrl: string | null;
+}
+
+export interface Achievement {
+  id: string;
+  slug: string;
+  name: string;
+  description: string;
+  icon: string;
+  xpReward: number;
+  category: string;
+  isSecret: boolean;
+}
+
+export interface Quest {
+  id: string;
+  slug: string;
+  name: string;
+  description: string;
+  storyIntro: string | null;
+  questType: string;
+  xpReward: number;
+  steps: any[];
+  isActive: boolean;
+}
+
+export interface UserQuest {
+  id: string;
+  questId: string;
+  status: string;
+  currentStep: number;
+  stepsCompleted: number[];
+  startedAt: string;
+  completedAt: string | null;
+  quest: Quest;
+}
 
 interface GameActionsProps {
   locations: Location[];

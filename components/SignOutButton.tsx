@@ -1,17 +1,17 @@
 "use client";
 
-import { createClient } from "@/utils/supabase/client";
+import { useAuth } from "@/contexts/AuthContext";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
 export default function SignOutButton() {
   const [isLoading, setIsLoading] = useState(false);
   const router = useRouter();
-  const supabase = createClient();
+  const { logout } = useAuth();
 
   const handleSignOut = async () => {
     setIsLoading(true);
-    await supabase.auth.signOut();
+    logout();
     router.push("/login");
     router.refresh();
   };
@@ -33,4 +33,3 @@ export default function SignOutButton() {
     </button>
   );
 }
-

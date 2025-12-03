@@ -1,7 +1,28 @@
 "use client";
 
 import { useCallback, useRef } from "react";
-import { Location, Achievement } from "./useGameProgress";
+
+// Import types from GameActions
+export interface Location {
+  id: string;
+  name: string;
+  nameKa?: string | null;
+  description?: string | null;
+  category: string;
+  xpReward: number;
+  imageUrl?: string | null;
+}
+
+export interface Achievement {
+  id: string;
+  slug?: string;
+  name: string;
+  description: string;
+  icon: string;
+  xpReward: number;
+  category: string;
+  isSecret: boolean;
+}
 
 interface MessageProcessorOptions {
   locations: Location[];

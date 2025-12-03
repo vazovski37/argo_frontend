@@ -29,6 +29,7 @@ export interface ToolHandlers {
   start_quest?: (args: { quest_name: string }) => Promise<{ success: boolean; message: string }>;
   complete_quest_step?: (args: { quest_name: string; step_number: number }) => Promise<{ success: boolean; xp_earned: number; message: string }>;
   get_user_progress?: () => Promise<{ level: number; xp: number; rank: string; locations_visited: number }>;
+  get_knowledge?: (args: { query: string }) => Promise<{ found: boolean; context: string; sources: string[] }>;
 }
 
 interface UseGeminiLiveOptions {
@@ -167,6 +168,20 @@ const GAME_TOOLS: { functionDeclarations: FunctionDeclaration[] } = {
       parameters: {
         type: Type.OBJECT,
         properties: {}
+      }
+    },
+    {
+      name: "get_knowledge",
+      description: "Search the knowledge base for detailed information about Poti, its history, attractions, culture, and local knowledge. Use this when you need specific facts or detailed information to answer a question accurately. The query should describe what information you need.",
+      parameters: {
+        type: Type.OBJECT,
+        properties: {
+          query: {
+            type: Type.STRING,
+            description: "A question or topic to search for in the knowledge base (e.g., 'history of Poti lighthouse', 'what is the legend of the Argonauts', 'best restaurants near the port')"
+          }
+        },
+        required: ["query"]
       }
     }
   ]
@@ -315,6 +330,18 @@ export function useGeminiLive(options: UseGeminiLiveOptions) {
           onmessage: async (message: any) => {
             const receiveTime = performance.now();
             
+            // Debug: log message structure to understand what's coming through
+            console.log("[MESSAGE] 📨 Received message keys:", Object.keys(message));
+            if (message.toolCall) {
+              console.log("[MESSAGE] 🔧 toolCall present:", JSON.stringify(message.toolCall, null, 2));
+            }
+            if (message.serverContent?.modelTurn?.parts) {
+              const partsWithFunctions = message.serverContent.modelTurn.parts.filter((p: any) => p.functionCall);
+              if (partsWithFunctions.length > 0) {
+                console.log("[MESSAGE] 🔧 Parts with functionCall:", JSON.stringify(partsWithFunctions, null, 2));
+              }
+            }
+            
             // Handle audio response
             const audio = message.serverContent?.modelTurn?.parts?.[0]?.inlineData;
             if (audio && outputAudioContextRef.current) {
@@ -379,66 +406,79 @@ export function useGeminiLive(options: UseGeminiLiveOptions) {
               onMessage?.(newMessage);
             }
 
-            // Handle function/tool calls
-            const toolCallPart = message.serverContent?.modelTurn?.parts?.find((p: any) => p.functionCall);
-            if (toolCallPart?.functionCall && toolHandlers) {
-              const { name, args } = toolCallPart.functionCall;
-              console.log("[TOOL] 🔧 Function call received:", name, args);
+            // Handle function/tool calls - Live API sends them as a separate message type
+            const functionCalls = message.toolCall?.functionCalls;
+            if (functionCalls && functionCalls.length > 0 && toolHandlers) {
+              console.log("[TOOL] 🔧 Tool calls received:", functionCalls.length);
               
-              const toolCall: ToolCall = {
-                id: Date.now().toString(),
-                name,
-                args: args || {},
-              };
-              onToolCall?.(toolCall);
+              const toolResponses: Array<{ id: string; name: string; response: any }> = [];
+              
+              for (const funcCall of functionCalls) {
+                const { name, args, id: funcId } = funcCall;
+                console.log("[TOOL] 🔧 Processing function call:", name, args);
+                
+                const toolCall: ToolCall = {
+                  id: funcId || Date.now().toString(),
+                  name,
+                  args: args || {},
+                };
+                onToolCall?.(toolCall);
 
-              // Execute the tool handler
-              let result: any = { success: false, message: "Tool not implemented" };
-              
-              try {
-                switch (name) {
-                  case "visit_location":
-                    if (toolHandlers.visit_location) {
-                      result = await toolHandlers.visit_location(args);
-                    }
-                    break;
-                  case "learn_phrase":
-                    if (toolHandlers.learn_phrase) {
-                      result = await toolHandlers.learn_phrase(args);
-                    }
-                    break;
-                  case "start_quest":
-                    if (toolHandlers.start_quest) {
-                      result = await toolHandlers.start_quest(args);
-                    }
-                    break;
-                  case "complete_quest_step":
-                    if (toolHandlers.complete_quest_step) {
-                      result = await toolHandlers.complete_quest_step(args);
-                    }
-                    break;
-                  case "get_user_progress":
-                    if (toolHandlers.get_user_progress) {
-                      result = await toolHandlers.get_user_progress();
-                    }
-                    break;
+                // Execute the tool handler
+                let result: any = { success: false, message: "Tool not implemented" };
+                
+                try {
+                  switch (name) {
+                    case "visit_location":
+                      if (toolHandlers.visit_location) {
+                        result = await toolHandlers.visit_location(args as { location_name: string });
+                      }
+                      break;
+                    case "learn_phrase":
+                      if (toolHandlers.learn_phrase) {
+                        result = await toolHandlers.learn_phrase(args as { phrase: string; meaning: string });
+                      }
+                      break;
+                    case "start_quest":
+                      if (toolHandlers.start_quest) {
+                        result = await toolHandlers.start_quest(args as { quest_name: string });
+                      }
+                      break;
+                    case "complete_quest_step":
+                      if (toolHandlers.complete_quest_step) {
+                        result = await toolHandlers.complete_quest_step(args as { quest_name: string; step_number: number });
+                      }
+                      break;
+                    case "get_user_progress":
+                      if (toolHandlers.get_user_progress) {
+                        result = await toolHandlers.get_user_progress();
+                      }
+                      break;
+                    case "get_knowledge":
+                      if (toolHandlers.get_knowledge) {
+                        result = await toolHandlers.get_knowledge(args as { query: string });
+                      }
+                      break;
+                  }
+                  console.log("[TOOL] ✅ Function result:", result);
+                } catch (err) {
+                  console.error("[TOOL] ❌ Function error:", err);
+                  result = { success: false, message: "Error executing function" };
                 }
-                console.log("[TOOL] ✅ Function result:", result);
-              } catch (err) {
-                console.error("[TOOL] ❌ Function error:", err);
-                result = { success: false, message: "Error executing function" };
+
+                toolResponses.push({
+                  id: funcId || toolCall.id,
+                  name: name,
+                  response: result,
+                });
               }
 
-              // Send the tool response back to the AI
-              if (sessionRef.current) {
+              // Send all tool responses back to the AI
+              if (sessionRef.current && toolResponses.length > 0) {
                 sessionRef.current.sendToolResponse({
-                  functionResponses: [{
-                    id: toolCallPart.functionCall.id || toolCall.id,
-                    name: name,
-                    response: result,
-                  }],
+                  functionResponses: toolResponses,
                 });
-                console.log("[TOOL] 📤 Sent tool response to AI");
+                console.log("[TOOL] 📤 Sent", toolResponses.length, "tool response(s) to AI");
               }
             }
 
