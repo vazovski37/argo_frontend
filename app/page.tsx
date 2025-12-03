@@ -74,7 +74,7 @@ export default async function Home() {
                 Google
               </span>
             </div>
-          </div>
+        </div>
 
           {/* Live Chat Button */}
           <Link

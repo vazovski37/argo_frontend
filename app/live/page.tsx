@@ -1,12 +1,26 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/utils/supabase/client";
-import { useGeminiLive, Message } from "@/hooks/useGeminiLive";
+import { useGeminiLive, Message, ToolHandlers } from "@/hooks/useGeminiLive";
+import { useGameProgress } from "@/hooks/useGameProgress";
+import { useMessageProcessor } from "@/hooks/useMessageProcessor";
+import { GameProgressBar } from "@/components/GameProgressBar";
+import { PhotoCapture } from "@/components/PhotoCapture";
+import { AchievementToast } from "@/components/AchievementToast";
+import { GameActions } from "@/components/GameActions";
 import Link from "next/link";
 
 const GEMINI_API_KEY = process.env.NEXT_PUBLIC_GEMINI_API_KEY || "";
+
+interface AchievementNotification {
+  id: string;
+  name: string;
+  icon: string;
+  xp: number;
+  isSecret?: boolean;
+}
 
 export default function LivePage() {
   const router = useRouter();
@@ -20,7 +34,184 @@ export default function LivePage() {
   const [textInput, setTextInput] = useState("");
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
+  const [hasVideo, setHasVideo] = useState(false);
+  const [showSidebar, setShowSidebar] = useState(true);
+  const [achievementNotifications, setAchievementNotifications] = useState<AchievementNotification[]>([]);
 
+  // Show achievement notification - defined early since it's used by toolHandlers
+  const showAchievement = useCallback((achievement: AchievementNotification) => {
+    setAchievementNotifications((prev) => [...prev, achievement]);
+  }, []);
+
+  const dismissAchievement = useCallback((id: string) => {
+    setAchievementNotifications((prev) => prev.filter((a) => a.id !== id));
+  }, []);
+
+  // Game progress hook
+  const {
+    gameState,
+    achievements,
+    userAchievements,
+    quests,
+    userQuests,
+    locations,
+    visitedLocationIds,
+    uploadPhoto,
+    visitLocation,
+    startQuest,
+    learnPhrase,
+    refreshProgress,
+  } = useGameProgress();
+
+  // Message processor to detect visits and phrases from conversation
+  const { processMessage } = useMessageProcessor({
+    locations,
+    visitedLocationIds,
+    phrasesLearned: gameState?.phrasesLearned || [],
+    onVisitLocation: visitLocation,
+    onLearnPhrase: learnPhrase,
+    onAchievementEarned: (achievement) => {
+      showAchievement({
+        id: achievement.id,
+        name: achievement.name,
+        icon: achievement.icon,
+        xp: achievement.xpReward,
+        isSecret: achievement.isSecret,
+      });
+    },
+    achievements,
+  });
+
+  // Build custom context for AI about visited locations
+  const visitedLocationsContext = useMemo(() => {
+    if (!locations.length) return "";
+    const visited = locations.filter(l => visitedLocationIds.includes(l.id));
+    const notVisited = locations.filter(l => !visitedLocationIds.includes(l.id));
+    return `
+## User's Exploration Progress
+The user has already visited these places (don't suggest them again, but you can reference their experience):
+${visited.length > 0 ? visited.map(l => `- ${l.name}`).join("\n") : "- None yet"}
+
+Places the user hasn't visited yet (suggest these!):
+${notVisited.slice(0, 8).map(l => `- ${l.name}`).join("\n")}
+
+IMPORTANT: When the user tells you they visited somewhere, are at a location, checked in, or arrived at a place, you MUST call the visit_location function to record their visit and award XP. Always call the function first, then respond based on the result.
+
+When the user asks to learn Georgian, teach them a phrase and then call learn_phrase when they acknowledge learning it.
+    `;
+  }, [locations, visitedLocationIds]);
+
+  // Tool handlers for function calling - these update Supabase
+  const toolHandlers: ToolHandlers = useMemo(() => ({
+    visit_location: async (args) => {
+      console.log("[TOOL HANDLER] 📍 visit_location called:", args.location_name);
+      
+      // Find the location by name (fuzzy match)
+      const locationName = args.location_name.toLowerCase();
+      const location = locations.find(l => 
+        l.name.toLowerCase().includes(locationName) ||
+        locationName.includes(l.name.toLowerCase()) ||
+        (l.nameKa && l.nameKa.includes(locationName))
+      );
+      
+      if (!location) {
+        console.log("[TOOL HANDLER] ❌ Location not found:", args.location_name);
+        return { success: false, xp_earned: 0, message: `Location "${args.location_name}" not found in our database.` };
+      }
+      
+      if (visitedLocationIds.includes(location.id)) {
+        return { success: true, xp_earned: 0, message: `You've already visited ${location.name}! No additional XP awarded.` };
+      }
+      
+      try {
+        const result = await visitLocation(location.id);
+        console.log("[TOOL HANDLER] ✅ Location visited:", location.name, "XP:", result.xpEarned);
+        
+        // Show achievement notifications
+        if (result.newAchievements.length > 0) {
+          result.newAchievements.forEach(name => {
+            const achievement = achievements.find(a => a.name === name);
+            if (achievement) {
+              showAchievement({
+                id: achievement.id,
+                name: achievement.name,
+                icon: achievement.icon,
+                xp: achievement.xpReward,
+                isSecret: achievement.isSecret,
+              });
+            }
+          });
+        }
+        
+        return { 
+          success: true, 
+          xp_earned: result.xpEarned, 
+          message: `Successfully recorded visit to ${location.name}! Earned ${result.xpEarned} XP.${result.newAchievements.length > 0 ? ` New achievements: ${result.newAchievements.join(", ")}` : ""}` 
+        };
+      } catch (err) {
+        console.error("[TOOL HANDLER] ❌ Error visiting location:", err);
+        return { success: false, xp_earned: 0, message: "Failed to record visit. Please try again." };
+      }
+    },
+    
+    learn_phrase: async (args) => {
+      console.log("[TOOL HANDLER] 🗣️ learn_phrase called:", args.phrase);
+      
+      if (gameState?.phrasesLearned.includes(args.phrase)) {
+        return { success: true, xp_earned: 0, message: `You've already learned "${args.phrase}"!` };
+      }
+      
+      try {
+        await learnPhrase(args.phrase);
+        console.log("[TOOL HANDLER] ✅ Phrase learned:", args.phrase);
+        return { success: true, xp_earned: 15, message: `Great job learning "${args.phrase}" (${args.meaning})! Earned 15 XP.` };
+      } catch (err) {
+        console.error("[TOOL HANDLER] ❌ Error learning phrase:", err);
+        return { success: false, xp_earned: 0, message: "Failed to save phrase. Please try again." };
+      }
+    },
+    
+    start_quest: async (args) => {
+      console.log("[TOOL HANDLER] 📜 start_quest called:", args.quest_name);
+      
+      const questName = args.quest_name.toLowerCase();
+      const quest = quests.find(q => q.name.toLowerCase().includes(questName) || questName.includes(q.name.toLowerCase()));
+      
+      if (!quest) {
+        return { success: false, message: `Quest "${args.quest_name}" not found.` };
+      }
+      
+      const existingQuest = userQuests.find(uq => uq.questId === quest.id);
+      if (existingQuest) {
+        return { success: true, message: `You've already ${existingQuest.status === 'completed' ? 'completed' : 'started'} "${quest.name}".` };
+      }
+      
+      try {
+        await startQuest(quest.id);
+        console.log("[TOOL HANDLER] ✅ Quest started:", quest.name);
+        return { success: true, message: `Quest "${quest.name}" has begun! ${quest.storyIntro || ''}` };
+      } catch (err) {
+        console.error("[TOOL HANDLER] ❌ Error starting quest:", err);
+        return { success: false, message: "Failed to start quest. Please try again." };
+      }
+    },
+    
+    get_user_progress: async () => {
+      console.log("[TOOL HANDLER] 📊 get_user_progress called");
+      return {
+        level: gameState?.currentLevel || 1,
+        xp: gameState?.totalXp || 0,
+        rank: gameState?.currentRank || "Tourist",
+        locations_visited: gameState?.locationsVisited || 0,
+        photos_taken: gameState?.photosTaken || 0,
+        quests_completed: gameState?.questsCompleted || 0,
+        achievements_earned: gameState?.achievementsEarned || 0,
+        phrases_learned: gameState?.phrasesLearned.length || 0,
+      };
+    },
+  }), [locations, visitedLocationIds, visitLocation, learnPhrase, startQuest, quests, userQuests, gameState, achievements, showAchievement]);
+
+  // Gemini Live hook with game state and function calling
   const {
     isConnected,
     isConnecting,
@@ -36,6 +227,14 @@ export default function LivePage() {
     toggleVideo,
   } = useGeminiLive({
     apiKey: GEMINI_API_KEY,
+    promptConfig: {
+      gameState: gameState || undefined,
+      customContext: visitedLocationsContext,
+    },
+    toolHandlers,
+    onToolCall: (toolCall) => {
+      console.log("[UI] 🔧 Tool called:", toolCall.name, toolCall.args);
+    },
     onError: (err) => {
       console.error("Live API Error:", err);
       setError(err.message || "Connection failed");
@@ -64,13 +263,26 @@ export default function LivePage() {
 
   // Attach media stream to video element
   useEffect(() => {
-    if (videoRef.current && mediaStream) {
-      console.log("Attaching media stream to video element");
-      videoRef.current.srcObject = mediaStream;
-      // Ensure video plays
-      videoRef.current.play().catch((e) => {
-        console.log("Video autoplay blocked, will play on interaction:", e);
+    if (mediaStream) {
+      const videoTracks = mediaStream.getVideoTracks();
+      const audioTracks = mediaStream.getAudioTracks();
+      console.log("Media stream tracks:", {
+        video: videoTracks.length,
+        audio: audioTracks.length,
+        videoLabels: videoTracks.map((t) => t.label),
+        audioLabels: audioTracks.map((t) => t.label),
       });
+
+      setHasVideo(videoTracks.length > 0);
+
+      if (videoRef.current && videoTracks.length > 0) {
+        videoRef.current.srcObject = mediaStream;
+        videoRef.current.play().catch((e) => {
+          console.log("Video autoplay blocked, will play on interaction:", e);
+        });
+      }
+    } else {
+      setHasVideo(false);
     }
   }, [mediaStream]);
 
@@ -81,7 +293,7 @@ export default function LivePage() {
         if (videoRef.current) {
           sendVideoFrame(videoRef.current);
         }
-      }, 1000); // Send frame every second
+      }, 1000);
     }
 
     return () => {
@@ -96,9 +308,40 @@ export default function LivePage() {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
+  // Process messages for game events (visits, phrases, etc.)
+  const lastProcessedMessageRef = useRef<string | null>(null);
+  useEffect(() => {
+    const processNewMessages = async () => {
+      if (messages.length === 0) return;
+      
+      const lastMessage = messages[messages.length - 1];
+      
+      // Skip if already processed
+      if (lastProcessedMessageRef.current === lastMessage.id) return;
+      lastProcessedMessageRef.current = lastMessage.id;
+
+      // Process the message
+      const result = await processMessage(lastMessage.content, lastMessage.role);
+      
+      if (result.xpEarned > 0) {
+        console.log(`[GAME] 🎮 Earned ${result.xpEarned} XP from conversation!`);
+        if (result.visitedLocation) {
+          console.log(`[GAME] 📍 Auto-checked into: ${result.visitedLocation.name}`);
+        }
+        if (result.learnedPhrase) {
+          console.log(`[GAME] 🗣️ Auto-learned phrase: ${result.learnedPhrase}`);
+        }
+      }
+    };
+
+    processNewMessages();
+  }, [messages, processMessage]);
+
   const handleConnect = () => {
     if (!GEMINI_API_KEY) {
-      setError("Gemini API key is not configured. Please add NEXT_PUBLIC_GEMINI_API_KEY to your .env.local file.");
+      setError(
+        "Gemini API key is not configured. Please add NEXT_PUBLIC_GEMINI_API_KEY to your .env.local file."
+      );
       return;
     }
     setError("");
@@ -120,6 +363,32 @@ export default function LivePage() {
     }
   };
 
+  // Handle photo capture
+  const handlePhotoCapture = useCallback(
+    async (file: File, type: "selfie" | "place" | "food" | "achievement") => {
+      try {
+        const photo = await uploadPhoto(file, type);
+        console.log("Photo uploaded:", photo);
+
+        // Check for photo-related achievements
+        const photoAchievements = achievements.filter(
+          (a) =>
+            (a.slug === "first_photo" || a.slug === "photographer" || a.slug === "selfie_master") &&
+            !userAchievements.includes(a.id)
+        );
+
+        // Refresh to check for new achievements
+        await refreshProgress();
+
+        // Show XP notification
+        // Could add a toast here for "+10 XP"
+      } catch (error) {
+        console.error("Error uploading photo:", error);
+      }
+    },
+    [uploadPhoto, achievements, userAchievements, refreshProgress]
+  );
+
   if (loading) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 flex items-center justify-center">
@@ -128,8 +397,24 @@ export default function LivePage() {
     );
   }
 
+  // Get active quest info
+  const activeQuest = userQuests.find((uq) => uq.status === "active");
+  const activeQuestDef = activeQuest ? quests.find((q) => q.id === activeQuest.questId) : null;
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900">
+      {/* Achievement Notifications */}
+      {achievementNotifications.map((notification) => (
+        <AchievementToast
+          key={notification.id}
+          name={notification.name}
+          icon={notification.icon}
+          xp={notification.xp}
+          isSecret={notification.isSecret}
+          onClose={() => dismissAchievement(notification.id)}
+        />
+      ))}
+
       {/* Ambient effects */}
       <div className="fixed inset-0 overflow-hidden pointer-events-none">
         <div className="absolute -top-40 -right-40 w-96 h-96 bg-purple-500 rounded-full mix-blend-multiply filter blur-3xl opacity-20 animate-pulse"></div>
@@ -139,27 +424,20 @@ export default function LivePage() {
 
       {/* Header */}
       <header className="relative z-10 border-b border-white/10 backdrop-blur-xl bg-white/5">
-        <div className="max-w-7xl mx-auto px-4 py-4 flex items-center justify-between">
+        <div className="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
           <Link href="/" className="flex items-center gap-3 group">
             <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-500 to-fuchsia-500 flex items-center justify-center shadow-lg shadow-purple-500/20 group-hover:shadow-purple-500/40 transition-shadow">
-              <svg
-                className="w-5 h-5 text-white"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M13 10V3L4 14h7v7l9-11h-7z"
-                />
-              </svg>
+              <span className="text-xl">⚓</span>
             </div>
-            <span className="text-white font-semibold text-lg">Argonauts</span>
+            <span className="text-white font-semibold text-lg hidden sm:inline">Poti Guide</span>
           </Link>
 
-          <div className="flex items-center gap-4">
+          {/* Game Progress in Header */}
+          <div className="flex-1 max-w-xs mx-4 hidden md:block">
+            <GameProgressBar gameState={gameState} compact />
+          </div>
+
+          <div className="flex items-center gap-3">
             {/* Connection Status */}
             <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/5 border border-white/10">
               <div
@@ -171,14 +449,20 @@ export default function LivePage() {
                     : "bg-slate-500"
                 }`}
               ></div>
-              <span className="text-sm text-slate-400">
-                {isConnected
-                  ? "Connected"
-                  : isConnecting
-                  ? "Connecting..."
-                  : "Disconnected"}
+              <span className="text-sm text-slate-400 hidden sm:inline">
+                {isConnected ? "Live" : isConnecting ? "Connecting..." : "Offline"}
               </span>
             </div>
+
+            {/* Toggle Sidebar */}
+            <button
+              onClick={() => setShowSidebar(!showSidebar)}
+              className="p-2 rounded-lg bg-white/5 border border-white/10 text-white/70 hover:text-white hover:bg-white/10 transition-all lg:hidden"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+              </svg>
+            </button>
 
             {/* User Avatar */}
             {user?.user_metadata?.avatar_url ? (
@@ -197,20 +481,86 @@ export default function LivePage() {
       </header>
 
       {/* Main Content */}
-      <main className="relative z-10 max-w-7xl mx-auto px-4 py-6">
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 h-[calc(100vh-140px)]">
-          {/* Video Panel */}
-          <div className="lg:col-span-2 flex flex-col gap-4">
+      <main className="relative z-10 max-w-7xl mx-auto px-4 py-4">
+        <div className="flex gap-4 h-[calc(100vh-100px)]">
+          {/* Left Sidebar - Game Progress */}
+          <div
+            className={`${
+              showSidebar ? "block" : "hidden"
+            } lg:block w-full lg:w-72 flex-shrink-0 space-y-4 absolute lg:relative inset-0 lg:inset-auto z-20 lg:z-auto bg-slate-900/95 lg:bg-transparent p-4 lg:p-0 overflow-y-auto`}
+          >
+            {/* Close button for mobile */}
+            <button
+              onClick={() => setShowSidebar(false)}
+              className="lg:hidden absolute top-4 right-4 p-2 rounded-lg bg-white/10 text-white"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+
+            {/* Full Progress Card */}
+            <GameProgressBar gameState={gameState} />
+
+            {/* Active Quest */}
+            {activeQuestDef && (
+              <div className="backdrop-blur-xl bg-white/5 border border-white/10 rounded-2xl p-4">
+                <div className="flex items-center gap-2 mb-3">
+                  <span className="text-lg">📜</span>
+                  <h3 className="text-white font-semibold">Active Quest</h3>
+                </div>
+                <p className="text-white text-sm font-medium">{activeQuestDef.name}</p>
+                <p className="text-slate-400 text-xs mt-1">
+                  Step {(activeQuest?.currentStep || 0) + 1} of {activeQuestDef.steps.length}
+                </p>
+                <div className="mt-2 h-1.5 bg-white/10 rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-gradient-to-r from-amber-500 to-orange-500 rounded-full transition-all"
+                    style={{
+                      width: `${((activeQuest?.currentStep || 0) / activeQuestDef.steps.length) * 100}%`,
+                    }}
+                  />
+                </div>
+              </div>
+            )}
+
+            {/* Game Actions Panel */}
+            <div className="backdrop-blur-xl bg-white/5 border border-white/10 rounded-2xl overflow-hidden flex-1 min-h-0">
+              <GameActions
+                locations={locations}
+                visitedLocationIds={visitedLocationIds}
+                achievements={achievements}
+                userAchievements={userAchievements}
+                quests={quests}
+                userQuests={userQuests}
+                phrasesLearned={gameState?.phrasesLearned || []}
+                onVisitLocation={visitLocation}
+                onStartQuest={startQuest}
+                onLearnPhrase={learnPhrase}
+                onAchievementEarned={(achievement) => {
+                  showAchievement({
+                    id: achievement.id,
+                    name: achievement.name,
+                    icon: achievement.icon,
+                    xp: achievement.xpReward,
+                    isSecret: achievement.isSecret,
+                  });
+                }}
+              />
+            </div>
+          </div>
+
+          {/* Center - Video & Controls */}
+          <div className="flex-1 flex flex-col gap-4 min-w-0">
             {/* Video Container */}
             <div className="relative flex-1 backdrop-blur-xl bg-white/5 border border-white/10 rounded-3xl overflow-hidden">
-              {/* Always render video element for camera preview */}
               <video
                 ref={videoRef}
                 autoPlay
                 playsInline
                 muted
                 className={`absolute inset-0 w-full h-full object-cover ${
-                  !mediaStream || !isVideoEnabled ? "opacity-0" : ""
+                  !mediaStream || !isVideoEnabled || !hasVideo ? "opacity-0" : ""
                 }`}
               />
 
@@ -218,26 +568,12 @@ export default function LivePage() {
                 /* Start Screen */
                 <div className="absolute inset-0 flex items-center justify-center p-8">
                   <div className="max-w-md w-full text-center">
-                    <div className="w-20 h-20 mx-auto mb-6 rounded-2xl bg-gradient-to-br from-violet-500 to-fuchsia-500 flex items-center justify-center">
-                      <svg
-                        className="w-10 h-10 text-white"
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth={2}
-                          d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"
-                        />
-                      </svg>
+                    <div className="w-24 h-24 mx-auto mb-6 rounded-2xl bg-gradient-to-br from-violet-500 to-fuchsia-500 flex items-center justify-center shadow-lg shadow-purple-500/30 animate-pulse-glow">
+                      <span className="text-5xl">⚓</span>
                     </div>
-                    <h2 className="text-2xl font-bold text-white mb-2">
-                      Start Live Conversation
-                    </h2>
+                    <h2 className="text-2xl font-bold text-white mb-2">Welcome, {gameState?.currentRank || "Traveler"}!</h2>
                     <p className="text-slate-400 mb-6">
-                      Talk with Gemini AI using your voice and camera in real-time
+                      Start your adventure in Poti with your AI guide
                     </p>
 
                     {error && (
@@ -251,20 +587,8 @@ export default function LivePage() {
                       disabled={isConnecting}
                       className="w-full py-4 px-6 bg-gradient-to-r from-violet-600 to-fuchsia-600 hover:from-violet-500 hover:to-fuchsia-500 text-white font-medium rounded-xl transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-lg shadow-purple-500/25 hover:shadow-purple-500/40"
                     >
-                      <svg
-                        className="w-5 h-5"
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth={2}
-                          d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"
-                        />
-                      </svg>
-                      Start Conversation
+                      <span className="text-xl">🎙️</span>
+                      Start Adventure
                     </button>
 
                     <p className="mt-4 text-xs text-slate-500">
@@ -273,36 +597,27 @@ export default function LivePage() {
                   </div>
                 </div>
               ) : isConnecting ? (
-                /* Connecting Screen - show over video */
+                /* Connecting Screen */
                 <div className="absolute inset-0 flex items-center justify-center p-8 bg-black/50 backdrop-blur-sm">
                   <div className="text-center">
                     <div className="w-16 h-16 mx-auto mb-4 border-4 border-purple-500/30 border-t-purple-500 rounded-full animate-spin"></div>
                     <p className="text-white font-medium">{status || "Connecting to Gemini..."}</p>
-                    <p className="text-slate-400 text-sm mt-1">Setting up your live session</p>
+                    <p className="text-slate-400 text-sm mt-1">Preparing your guide</p>
                   </div>
                 </div>
               ) : (
-                /* Connected - Video is already showing, just add overlays */
+                /* Connected - Video overlays */
                 <>
-                  {!isVideoEnabled && (
+                  {(!isVideoEnabled || !hasVideo) && (
                     <div className="absolute inset-0 flex items-center justify-center bg-slate-900/50">
                       <div className="text-center">
-                        <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-white/10 flex items-center justify-center">
-                          <svg
-                            className="w-8 h-8 text-slate-400"
-                            fill="none"
-                            stroke="currentColor"
-                            viewBox="0 0 24 24"
-                          >
-                            <path
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              strokeWidth={2}
-                              d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"
-                            />
-                          </svg>
+                        <div className="w-20 h-20 mx-auto mb-4 rounded-full bg-gradient-to-br from-green-500/20 to-emerald-500/20 border border-green-500/30 flex items-center justify-center">
+                          <span className="text-4xl animate-bounce-slow">🎙️</span>
                         </div>
-                        <p className="text-slate-400">Camera is off</p>
+                        <p className="text-white font-medium">Listening...</p>
+                        <p className="text-slate-400 text-sm mt-1">
+                          {hasVideo ? "Camera is off" : "Audio-only mode"}
+                        </p>
                       </div>
                     </div>
                   )}
@@ -314,13 +629,20 @@ export default function LivePage() {
                       <span className="text-sm text-red-400 font-medium">LIVE</span>
                     </div>
                   )}
+
+                  {/* XP Display */}
+                  {isConnected && gameState && (
+                    <div className="absolute top-4 right-4 flex items-center gap-2 px-3 py-1.5 rounded-full bg-amber-500/20 border border-amber-500/30">
+                      <span className="text-amber-400 font-bold text-sm">{gameState.totalXp} XP</span>
+                    </div>
+                  )}
                 </>
               )}
             </div>
 
             {/* Controls */}
             {isConnected && (
-              <div className="flex items-center justify-center gap-4">
+              <div className="flex items-center justify-center gap-3">
                 {/* Mute Button */}
                 <button
                   onClick={toggleMute}
@@ -331,32 +653,17 @@ export default function LivePage() {
                   }`}
                 >
                   {isMuted ? (
-                    <svg
-                      className="w-6 h-6"
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
+                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path
                         strokeLinecap="round"
                         strokeLinejoin="round"
                         strokeWidth={2}
                         d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z"
                       />
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M17 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2"
-                      />
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2" />
                     </svg>
                   ) : (
-                    <svg
-                      className="w-6 h-6"
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
+                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path
                         strokeLinecap="round"
                         strokeLinejoin="round"
@@ -376,48 +683,29 @@ export default function LivePage() {
                       : "bg-white/10 border border-white/20 text-white hover:bg-white/20"
                   }`}
                 >
-                  {isVideoEnabled ? (
-                    <svg
-                      className="w-6 h-6"
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"
-                      />
-                    </svg>
-                  ) : (
-                    <svg
-                      className="w-6 h-6"
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"
-                      />
-                    </svg>
-                  )}
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"
+                    />
+                  </svg>
                 </button>
+
+                {/* Photo Capture */}
+                <PhotoCapture
+                  onCapture={handlePhotoCapture}
+                  videoStream={mediaStream}
+                  isCapturing={false}
+                />
 
                 {/* End Call */}
                 <button
                   onClick={handleDisconnect}
                   className="p-4 rounded-2xl bg-red-500 hover:bg-red-600 text-white transition-all duration-300"
                 >
-                  <svg
-                    className="w-6 h-6"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path
                       strokeLinecap="round"
                       strokeLinejoin="round"
@@ -430,49 +718,36 @@ export default function LivePage() {
             )}
           </div>
 
-          {/* Chat Panel */}
-          <div className="flex flex-col backdrop-blur-xl bg-white/5 border border-white/10 rounded-3xl overflow-hidden">
+          {/* Right - Chat Panel */}
+          <div className="hidden lg:flex w-80 flex-shrink-0 flex-col backdrop-blur-xl bg-white/5 border border-white/10 rounded-3xl overflow-hidden">
             {/* Chat Header */}
-            <div className="px-6 py-4 border-b border-white/10">
-              <h2 className="text-lg font-semibold text-white">Conversation</h2>
-              <p className="text-sm text-slate-400">
-                {isConnected
-                  ? "Speak or type to chat with Gemini"
-                  : "Connect to start chatting"}
+            <div className="px-4 py-3 border-b border-white/10">
+              <h2 className="text-white font-semibold flex items-center gap-2">
+                <span>💬</span> Chat
+              </h2>
+              <p className="text-xs text-slate-400">
+                {isConnected ? "Speak or type" : "Connect to chat"}
               </p>
             </div>
 
             {/* Messages */}
-            <div className="flex-1 overflow-y-auto p-4 space-y-4">
+            <div className="flex-1 overflow-y-auto p-3 space-y-3">
               {messages.length === 0 ? (
                 <div className="text-center py-8">
                   <div className="w-12 h-12 mx-auto mb-3 rounded-xl bg-white/10 flex items-center justify-center">
-                    <svg
-                      className="w-6 h-6 text-slate-500"
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"
-                      />
-                    </svg>
+                    <span className="text-2xl">💭</span>
                   </div>
                   <p className="text-slate-500 text-sm">No messages yet</p>
+                  <p className="text-slate-600 text-xs mt-1">Start talking to your guide!</p>
                 </div>
               ) : (
                 messages.map((message) => (
                   <div
                     key={message.id}
-                    className={`flex ${
-                      message.role === "user" ? "justify-end" : "justify-start"
-                    }`}
+                    className={`flex ${message.role === "user" ? "justify-end" : "justify-start"}`}
                   >
                     <div
-                      className={`max-w-[85%] px-4 py-3 rounded-2xl ${
+                      className={`max-w-[85%] px-3 py-2 rounded-2xl ${
                         message.role === "user"
                           ? "bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white"
                           : "bg-white/10 text-slate-200"
@@ -481,9 +756,7 @@ export default function LivePage() {
                       <p className="text-sm leading-relaxed">{message.content}</p>
                       <p
                         className={`text-xs mt-1 ${
-                          message.role === "user"
-                            ? "text-white/60"
-                            : "text-slate-500"
+                          message.role === "user" ? "text-white/60" : "text-slate-500"
                         }`}
                       >
                         {message.timestamp.toLocaleTimeString([], {
@@ -500,31 +773,21 @@ export default function LivePage() {
 
             {/* Text Input */}
             {isConnected && (
-              <form onSubmit={handleSendMessage} className="p-4 border-t border-white/10">
+              <form onSubmit={handleSendMessage} className="p-3 border-t border-white/10">
                 <div className="flex gap-2">
                   <input
                     type="text"
                     value={textInput}
                     onChange={(e) => setTextInput(e.target.value)}
                     placeholder="Type a message..."
-                    className="flex-1 px-4 py-3 bg-white/10 border border-white/20 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-purple-500/50 focus:border-transparent text-sm"
+                    className="flex-1 px-3 py-2 bg-white/10 border border-white/20 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-purple-500/50 focus:border-transparent text-sm"
                   />
                   <button
                     type="submit"
-                    className="px-4 py-3 bg-gradient-to-r from-violet-600 to-fuchsia-600 hover:from-violet-500 hover:to-fuchsia-500 text-white rounded-xl transition-all duration-300"
+                    className="px-3 py-2 bg-gradient-to-r from-violet-600 to-fuchsia-600 hover:from-violet-500 hover:to-fuchsia-500 text-white rounded-xl transition-all duration-300"
                   >
-                    <svg
-                      className="w-5 h-5"
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"
-                      />
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
                     </svg>
                   </button>
                 </div>
@@ -536,4 +799,3 @@ export default function LivePage() {
     </div>
   );
 }
-
