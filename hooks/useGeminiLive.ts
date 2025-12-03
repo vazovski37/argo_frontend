@@ -494,7 +494,11 @@ export function useGeminiLive(options: UseGeminiLiveOptions) {
   }, [apiKey, isConnecting, isConnected, onError, onStatusChange, onMessage]);
 
   const startAudioCapture = useCallback((stream: MediaStream) => {
-    if (!inputAudioContextRef.current || !sessionRef.current) return;
+    if (!inputAudioContextRef.current) return;
+    
+    // Note: sessionRef.current may not be set yet when onopen fires,
+    // but we still need to start capture. The sendRealtimeInput calls
+    // inside onaudioprocess check for sessionRef.current anyway.
 
     console.log("[CAPTURE] 🎤 Starting audio capture...");
     
