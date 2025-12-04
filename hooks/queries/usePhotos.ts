@@ -26,6 +26,22 @@ async function fetchLocationPhotos(locationId: string): Promise<PhotosResponse> 
   return response.json();
 }
 
+async function fetchPhotoFeed(filter: string = "all", groupId?: string): Promise<PhotosResponse> {
+  const params = new URLSearchParams({ filter });
+  if (groupId) {
+    params.append("group_id", groupId);
+  }
+
+  const response = await fetch(`/api/photos/feed?${params.toString()}`);
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.error || "Failed to fetch photo feed");
+  }
+
+  return response.json();
+}
+
 export function usePhotos(enabled = true) {
   return useQuery({
     queryKey: queryKeys.photos.list(),
@@ -41,6 +57,15 @@ export function useLocationPhotos(locationId: string, enabled = true) {
     queryFn: () => fetchLocationPhotos(locationId),
     enabled: enabled && !!locationId,
     staleTime: 60 * 1000, // 1 minute
+  });
+}
+
+export function usePhotoFeed(filter: string = "all", groupId?: string, enabled = true) {
+  return useQuery({
+    queryKey: queryKeys.photos.feed(filter, groupId),
+    queryFn: () => fetchPhotoFeed(filter, groupId),
+    enabled,
+    staleTime: 30 * 1000, // 30 seconds (feed updates more frequently)
   });
 }
 

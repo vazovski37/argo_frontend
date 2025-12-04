@@ -11,9 +11,11 @@ import {
   useMapsLibrary,
 } from "@vis.gl/react-google-maps";
 import { useLocations } from "@/hooks/queries/useLocations";
+import { usePhotoFeed } from "@/hooks/queries/usePhotos";
 import { useVisitLocation } from "@/hooks/mutations/useVisitLocation";
 import { MapPin, Navigation, CheckCircle, Loader2, AlertCircle, Route } from "lucide-react";
 import type { Location } from "@/lib/schemas/locations";
+import type { Photo } from "@/lib/schemas/photos";
 
 // Poti, Georgia coordinates
 const POTI_CENTER = { lat: 42.15, lng: 41.67 };
@@ -144,6 +146,7 @@ function MapContent({ focusedLocationId }: MapContentProps) {
   
   const [userPos, setUserPos] = useState<UserPosition | null>(null);
   const [selectedLocation, setSelectedLocation] = useState<Location | null>(null);
+  const [selectedPhoto, setSelectedPhoto] = useState<Photo | null>(null);
   const [checkedInLocations, setCheckedInLocations] = useState<Set<string>>(new Set());
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
   const [directionsResponse, setDirectionsResponse] = useState<google.maps.DirectionsResult | null>(null);
@@ -152,6 +155,9 @@ function MapContent({ focusedLocationId }: MapContentProps) {
 
   // Fetch locations
   const { data: locationsData, isLoading: locationsLoading, error: locationsError } = useLocations();
+  
+  // Fetch photos
+  const { data: photosData } = usePhotoFeed("all");
   
   // Auto-focus on location when focusedLocationId is provided
   useEffect(() => {
@@ -223,6 +229,7 @@ function MapContent({ focusedLocationId }: MapContentProps) {
   // Clear directions when closing info window
   const handleCloseInfoWindow = useCallback(() => {
     setSelectedLocation(null);
+    setSelectedPhoto(null);
     setDirectionsResponse(null);
   }, []);
 
@@ -319,6 +326,21 @@ function MapContent({ focusedLocationId }: MapContentProps) {
   }, [userPos, selectedLocation]);
 
   const locations = locationsData?.locations || [];
+  const photos = photosData?.photos || [];
+
+  // Get border color for photo based on visibility
+  const getPhotoBorderColor = (visibility: string) => {
+    switch (visibility) {
+      case "private":
+        return "border-blue-500";
+      case "group":
+        return "border-green-500";
+      case "public":
+        return "border-white";
+      default:
+        return "border-gray-500";
+    }
+  };
 
   return (
     <>
@@ -330,7 +352,7 @@ function MapContent({ focusedLocationId }: MapContentProps) {
         disableDefaultUI={false}
         className="w-full h-full"
       >
-        {/* Quest Location Markers */}
+        {/* Quest Location Markers (Gold Pins) */}
         {locations.map((location) => {
           if (!location.latitude || !location.longitude) return null;
           
@@ -339,13 +361,15 @@ function MapContent({ focusedLocationId }: MapContentProps) {
 
           return (
             <AdvancedMarker
-              key={location.id}
+              key={`location-${location.id}`}
               position={{ lat: location.latitude, lng: location.longitude }}
               onClick={() => {
                 setSelectedLocation(location);
+                setSelectedPhoto(null); // Clear photo selection
                 setDirectionsResponse(null); // Clear existing route
               }}
               title={location.name}
+              zIndex={50}
             >
               <Pin
                 background={isCheckedIn ? "#10B981" : colors.background}
@@ -353,6 +377,43 @@ function MapContent({ focusedLocationId }: MapContentProps) {
                 borderColor={isCheckedIn ? "#059669" : colors.border}
                 scale={1.2}
               />
+            </AdvancedMarker>
+          );
+        })}
+
+        {/* Photo Memory Markers */}
+        {photos.map((photo) => {
+          if (!photo.latitude || !photo.longitude) return null;
+
+          const borderColor = getPhotoBorderColor(photo.visibility || "private");
+          const photoUrl = photo.url || photo.gcs_url || "";
+
+          return (
+            <AdvancedMarker
+              key={`photo-${photo.id}`}
+              position={{ lat: photo.latitude, lng: photo.longitude }}
+              onClick={() => {
+                setSelectedPhoto(photo);
+                setSelectedLocation(null); // Clear location selection
+                setDirectionsResponse(null); // Clear existing route
+              }}
+              title={photo.caption || "Memory"}
+              zIndex={10}
+            >
+              <div
+                className={`w-10 h-10 rounded-full border-4 ${borderColor} overflow-hidden bg-slate-200 shadow-lg`}
+                style={{
+                  backgroundImage: photoUrl ? `url(${photoUrl})` : "none",
+                  backgroundSize: "cover",
+                  backgroundPosition: "center",
+                }}
+              >
+                {!photoUrl && (
+                  <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-purple-400 to-pink-400">
+                    <span className="text-white text-xs">📸</span>
+                  </div>
+                )}
+              </div>
             </AdvancedMarker>
           );
         })}
@@ -369,6 +430,83 @@ function MapContent({ focusedLocationId }: MapContentProps) {
               <div className="w-4 h-4 bg-blue-600 rounded-full border-2 border-white shadow-lg" />
             </div>
           </AdvancedMarker>
+        )}
+
+        {/* Info Window for Selected Photo */}
+        {selectedPhoto && selectedPhoto.latitude && selectedPhoto.longitude && (
+          <InfoWindow
+            position={{ lat: selectedPhoto.latitude, lng: selectedPhoto.longitude }}
+            onCloseClick={handleCloseInfoWindow}
+            pixelOffset={[0, -40]}
+          >
+            <div className="min-w-[280px] max-w-[320px] p-1">
+              {/* Photo */}
+              <div className="mb-3 rounded-lg overflow-hidden">
+                <img
+                  src={selectedPhoto.url || selectedPhoto.gcs_url || ""}
+                  alt={selectedPhoto.caption || "Memory"}
+                  className="w-full h-48 object-cover"
+                />
+              </div>
+
+              {/* Caption */}
+              {selectedPhoto.caption && (
+                <p className="text-sm text-slate-700 mb-3">{selectedPhoto.caption}</p>
+              )}
+
+              {/* User Info */}
+              <div className="flex items-center gap-2 mb-2">
+                {selectedPhoto.user?.avatar_url ? (
+                  <img
+                    src={selectedPhoto.user.avatar_url}
+                    alt={selectedPhoto.user.name || "User"}
+                    className="w-6 h-6 rounded-full"
+                  />
+                ) : (
+                  <div className="w-6 h-6 rounded-full bg-gradient-to-br from-purple-400 to-pink-400 flex items-center justify-center text-white text-xs">
+                    {selectedPhoto.user?.name?.[0]?.toUpperCase() || "U"}
+                  </div>
+                )}
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-slate-900 truncate">
+                    {selectedPhoto.user?.name || "Unknown User"}
+                  </p>
+                  {selectedPhoto.uploaded_at && (
+                    <p className="text-xs text-slate-500">
+                      {new Date(selectedPhoto.uploaded_at).toLocaleDateString("en-US", {
+                        month: "short",
+                        day: "numeric",
+                        year: "numeric",
+                      })}
+                    </p>
+                  )}
+                </div>
+                {/* Visibility Badge */}
+                <div
+                  className={`px-2 py-1 rounded-full text-xs font-medium ${
+                    selectedPhoto.visibility === "private"
+                      ? "bg-blue-100 text-blue-700"
+                      : selectedPhoto.visibility === "group"
+                      ? "bg-green-100 text-green-700"
+                      : "bg-slate-100 text-slate-700"
+                  }`}
+                >
+                  {selectedPhoto.visibility === "private" && "🔒"}
+                  {selectedPhoto.visibility === "group" && "👥"}
+                  {selectedPhoto.visibility === "public" && "🌍"}
+                </div>
+              </div>
+
+              {/* Location Link */}
+              {selectedPhoto.location && (
+                <div className="pt-2 border-t border-slate-200">
+                  <p className="text-xs text-slate-500">
+                    📍 {selectedPhoto.location.name}
+                  </p>
+                </div>
+              )}
+            </div>
+          </InfoWindow>
         )}
 
         {/* Info Window for Selected Location */}

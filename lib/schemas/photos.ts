@@ -5,14 +5,19 @@ export const PhotoSchema = z.object({
   id: z.string(),
   user_id: z.string(),
   location_id: z.string().nullable().optional(),
+  group_id: z.string().nullable().optional(),
   file_name: z.string().optional(),
   url: z.string(),
+  gcs_url: z.string().optional(),
   caption: z.string().nullable().optional(),
   is_selfie: z.boolean().default(false),
+  visibility: z.enum(["private", "group", "public"]).default("private"),
   latitude: z.number().nullable().optional(),
   longitude: z.number().nullable().optional(),
   uploaded_at: z.string(),
   location: z.any().optional(),
+  user: z.any().optional(),
+  group: z.any().optional(),
 });
 
 export type Photo = z.infer<typeof PhotoSchema>;

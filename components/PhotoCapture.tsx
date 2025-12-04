@@ -1,23 +1,66 @@
 "use client";
 
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
+import { useUploadPhoto, type UploadPhotoInput } from "@/hooks/mutations/usePhotoMutations";
+import { useMyGroups } from "@/hooks/useGroups";
+import { Copy, Check, Loader2 } from "lucide-react";
 
 interface PhotoCaptureProps {
-  onCapture: (file: File, type: 'selfie' | 'place' | 'food' | 'achievement') => Promise<void>;
   videoStream?: MediaStream | null;
   isCapturing?: boolean;
   className?: string;
+  onUploadComplete?: () => void;
 }
 
-export function PhotoCapture({ onCapture, videoStream, isCapturing = false, className = "" }: PhotoCaptureProps) {
-  const [photoType, setPhotoType] = useState<'selfie' | 'place' | 'food' | 'achievement'>('place');
-  const [isProcessing, setIsProcessing] = useState(false);
+type VisibilityType = "private" | "group" | "public";
+
+export function PhotoCapture({ 
+  videoStream, 
+  isCapturing = false, 
+  className = "",
+  onUploadComplete 
+}: PhotoCaptureProps) {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-  const [showOptions, setShowOptions] = useState(false);
+  const [showPreview, setShowPreview] = useState(false);
+  const [caption, setCaption] = useState("");
+  const [visibility, setVisibility] = useState<VisibilityType>("private");
+  const [selectedGroupId, setSelectedGroupId] = useState<string | undefined>();
+  const [location, setLocation] = useState<{ lat: number; lng: number } | null>(null);
+  const [locationError, setLocationError] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
   
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const capturedFileRef = useRef<File | null>(null);
+  
+  const uploadMutation = useUploadPhoto();
+  const { data: groupsData } = useMyGroups();
+  const groups = groupsData?.groups || [];
+
+  // Get location when preview is shown
+  useEffect(() => {
+    if (showPreview && !location) {
+      if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(
+          (position) => {
+            setLocation({
+              lat: position.coords.latitude,
+              lng: position.coords.longitude,
+            });
+            setLocationError(null);
+          },
+          (error) => {
+            console.error("Geolocation error:", error);
+            setLocationError("Could not get location. Please enable location services.");
+          },
+          { timeout: 10000, maximumAge: 60000 }
+        );
+      } else {
+        setLocationError("Geolocation is not supported by your browser.");
+      }
+    }
+  }, [showPreview, location]);
 
   // Capture from video stream
   const captureFromVideo = useCallback(async () => {
@@ -31,70 +74,101 @@ export function PhotoCapture({ onCapture, videoStream, isCapturing = false, clas
     
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
-
-    // Draw mirrored for selfie
-    if (photoType === 'selfie') {
-      ctx.translate(canvas.width, 0);
-      ctx.scale(-1, 1);
-    }
     
     ctx.drawImage(video, 0, 0);
     
-    // Reset transform
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-
     // Convert to blob
     canvas.toBlob(async (blob) => {
       if (!blob) return;
       
-      const file = new File([blob], `${photoType}_${Date.now()}.jpg`, { type: 'image/jpeg' });
+      const file = new File([blob], `photo_${Date.now()}.jpg`, { type: "image/jpeg" });
+      capturedFileRef.current = file;
       setPreviewUrl(URL.createObjectURL(blob));
-      setShowOptions(true);
-      
-      // Store file for later use
-      (window as any).__capturedFile = file;
-    }, 'image/jpeg', 0.9);
-  }, [videoStream, photoType]);
+      setShowPreview(true);
+    }, "image/jpeg", 0.9);
+  }, [videoStream]);
 
   // Handle file upload
   const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
+    capturedFileRef.current = file;
     setPreviewUrl(URL.createObjectURL(file));
-    setShowOptions(true);
-    (window as any).__capturedFile = file;
+    setShowPreview(true);
   }, []);
 
-  // Confirm and upload
-  const confirmPhoto = useCallback(async () => {
-    const file = (window as any).__capturedFile;
+  // Upload photo with selected visibility
+  const handleUpload = useCallback(async (vis: VisibilityType, groupId?: string) => {
+    const file = capturedFileRef.current;
     if (!file) return;
 
-    setIsProcessing(true);
+    if (!location) {
+      setLocationError("Please wait for location to be determined.");
+      return;
+    }
+
+    const uploadData: UploadPhotoInput = {
+      file,
+      latitude: location.lat,
+      longitude: location.lng,
+      visibility: vis,
+      groupId: vis === "group" ? groupId : undefined,
+      caption: caption.trim() || undefined,
+      isSelfie: false, // Can be enhanced later
+    };
+
     try {
-      await onCapture(file, photoType);
+      await uploadMutation.mutateAsync(uploadData);
+      
+      // Reset state
       setPreviewUrl(null);
-      setShowOptions(false);
-      (window as any).__capturedFile = null;
+      setShowPreview(false);
+      setCaption("");
+      setVisibility("private");
+      setSelectedGroupId(undefined);
+      capturedFileRef.current = null;
+      setLocation(null);
+      setLocationError(null);
+      
+      onUploadComplete?.();
     } catch (error) {
       console.error("Error uploading photo:", error);
-    } finally {
-      setIsProcessing(false);
     }
-  }, [onCapture, photoType]);
+  }, [location, caption, uploadMutation, onUploadComplete]);
 
   // Cancel photo
   const cancelPhoto = useCallback(() => {
+    if (previewUrl) {
+      URL.revokeObjectURL(previewUrl);
+    }
     setPreviewUrl(null);
-    setShowOptions(false);
-    (window as any).__capturedFile = null;
+    setShowPreview(false);
+    setCaption("");
+    setVisibility("private");
+    setSelectedGroupId(undefined);
+    capturedFileRef.current = null;
+    setLocation(null);
+    setLocationError(null);
+  }, [previewUrl]);
+
+  // Copy join code
+  const copyJoinCode = useCallback((code: string) => {
+    navigator.clipboard.writeText(code);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
   }, []);
 
   // Attach video stream
-  if (videoRef.current && videoStream && videoRef.current.srcObject !== videoStream) {
-    videoRef.current.srcObject = videoStream;
-  }
+  useEffect(() => {
+    if (videoRef.current && videoStream && videoRef.current.srcObject !== videoStream) {
+      videoRef.current.srcObject = videoStream;
+    }
+  }, [videoStream]);
+
+  const isLoading = uploadMutation.isPending;
+  const hasMultipleGroups = groups.length > 1;
+  const canUploadGroup = visibility === "group" && (hasMultipleGroups ? selectedGroupId : groups[0]?.id);
 
   return (
     <div className={`relative ${className}`}>
@@ -109,63 +183,139 @@ export function PhotoCapture({ onCapture, videoStream, isCapturing = false, clas
         className="hidden"
       />
 
-      {/* Preview overlay */}
-      {previewUrl && showOptions && (
-        <div className="fixed inset-0 z-50 bg-black/90 flex flex-col items-center justify-center p-4">
-          <div className="relative max-w-lg w-full">
-            <img 
-              src={previewUrl} 
-              alt="Preview" 
-              className="w-full rounded-2xl shadow-2xl"
-            />
-            
-            {/* Photo type selector */}
-            <div className="mt-4 flex justify-center gap-2">
-              {(['selfie', 'place', 'food', 'achievement'] as const).map((type) => (
-                <button
-                  key={type}
-                  onClick={() => setPhotoType(type)}
-                  className={`px-4 py-2 rounded-xl text-sm font-medium transition-all ${
-                    photoType === type
-                      ? 'bg-purple-500 text-white'
-                      : 'bg-white/10 text-white/70 hover:bg-white/20'
-                  }`}
-                >
-                  {type === 'selfie' && '🤳 Selfie'}
-                  {type === 'place' && '🏛️ Place'}
-                  {type === 'food' && '🍽️ Food'}
-                  {type === 'achievement' && '🏆 Achievement'}
-                </button>
-              ))}
+      {/* Preview & Share Screen */}
+      {showPreview && previewUrl && (
+        <div className="fixed inset-0 z-50 bg-black/95 flex flex-col items-center justify-center p-4">
+          <div className="relative max-w-lg w-full max-h-[90vh] overflow-y-auto">
+            {/* Preview Image */}
+            <div className="relative mb-4">
+              <img 
+                src={previewUrl} 
+                alt="Preview" 
+                className="w-full rounded-2xl shadow-2xl"
+              />
+              {locationError && (
+                <div className="absolute top-2 left-2 right-2 bg-red-500/90 text-white text-xs p-2 rounded-lg">
+                  {locationError}
+                </div>
+              )}
+              {!location && !locationError && (
+                <div className="absolute top-2 left-2 right-2 bg-blue-500/90 text-white text-xs p-2 rounded-lg flex items-center gap-2">
+                  <Loader2 className="w-3 h-3 animate-spin" />
+                  Getting location...
+                </div>
+              )}
             </div>
 
-            {/* Action buttons */}
-            <div className="mt-6 flex justify-center gap-4">
+            {/* Caption Input */}
+            <div className="mb-4">
+              <textarea
+                value={caption}
+                onChange={(e) => setCaption(e.target.value)}
+                placeholder="Add a caption (optional)..."
+                className="w-full p-3 bg-white/10 border border-white/20 rounded-xl text-white placeholder-white/50 resize-none focus:outline-none focus:ring-2 focus:ring-purple-500"
+                rows={3}
+              />
+            </div>
+
+            {/* Visibility Action Buttons */}
+            <div className="space-y-3">
+              {/* Private Button */}
               <button
-                onClick={cancelPhoto}
-                disabled={isProcessing}
-                className="px-6 py-3 bg-white/10 hover:bg-white/20 text-white rounded-xl transition-all disabled:opacity-50"
+                onClick={() => handleUpload("private")}
+                disabled={isLoading || !location}
+                className={`w-full px-6 py-4 rounded-xl font-medium transition-all flex items-center justify-center gap-2 ${
+                  visibility === "private"
+                    ? "bg-blue-600 hover:bg-blue-700 text-white"
+                    : "bg-white/10 hover:bg-white/20 text-white border border-white/20"
+                } disabled:opacity-50 disabled:cursor-not-allowed`}
               >
-                Retake
-              </button>
-              <button
-                onClick={confirmPhoto}
-                disabled={isProcessing}
-                className="px-6 py-3 bg-gradient-to-r from-violet-600 to-fuchsia-600 hover:from-violet-500 hover:to-fuchsia-500 text-white rounded-xl transition-all disabled:opacity-50 flex items-center gap-2"
-              >
-                {isProcessing ? (
+                {isLoading && visibility === "private" ? (
                   <>
-                    <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                    Saving...
+                    <Loader2 className="w-5 h-5 animate-spin" />
+                    Uploading...
                   </>
                 ) : (
                   <>
-                    <span>📸</span>
-                    Save Photo (+{photoType === 'achievement' ? 15 : 10} XP)
+                    <span className="text-xl">🔒</span>
+                    Private
+                  </>
+                )}
+              </button>
+
+              {/* Group Button */}
+              {groups.length > 0 && (
+                <div className="space-y-2">
+                  {hasMultipleGroups && visibility === "group" && (
+                    <select
+                      value={selectedGroupId || ""}
+                      onChange={(e) => setSelectedGroupId(e.target.value)}
+                      className="w-full p-3 bg-white/10 border border-white/20 rounded-xl text-white focus:outline-none focus:ring-2 focus:ring-green-500"
+                    >
+                      <option value="">Select a group...</option>
+                      {groups.map((group) => (
+                        <option key={group.id} value={group.id} className="bg-gray-800">
+                          {group.name}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                  <button
+                    onClick={() => handleUpload("group", selectedGroupId || groups[0]?.id)}
+                    disabled={isLoading || !location || !canUploadGroup}
+                    className={`w-full px-6 py-4 rounded-xl font-medium transition-all flex items-center justify-center gap-2 ${
+                      visibility === "group"
+                        ? "bg-green-600 hover:bg-green-700 text-white"
+                        : "bg-white/10 hover:bg-white/20 text-white border border-white/20"
+                    } disabled:opacity-50 disabled:cursor-not-allowed`}
+                  >
+                    {isLoading && visibility === "group" ? (
+                      <>
+                        <Loader2 className="w-5 h-5 animate-spin" />
+                        Uploading...
+                      </>
+                    ) : (
+                      <>
+                        <span className="text-xl">👥</span>
+                        Group {hasMultipleGroups ? `(${groups.find(g => g.id === (selectedGroupId || groups[0]?.id))?.name})` : ""}
+                      </>
+                    )}
+                  </button>
+                </div>
+              )}
+
+              {/* Public Button */}
+              <button
+                onClick={() => handleUpload("public")}
+                disabled={isLoading || !location}
+                className={`w-full px-6 py-4 rounded-xl font-medium transition-all flex items-center justify-center gap-2 ${
+                  visibility === "public"
+                    ? "bg-purple-600 hover:bg-purple-700 text-white"
+                    : "bg-white/10 hover:bg-white/20 text-white border border-white/20"
+                } disabled:opacity-50 disabled:cursor-not-allowed`}
+              >
+                {isLoading && visibility === "public" ? (
+                  <>
+                    <Loader2 className="w-5 h-5 animate-spin" />
+                    Uploading...
+                  </>
+                ) : (
+                  <>
+                    <span className="text-xl">🌍</span>
+                    Public
                   </>
                 )}
               </button>
             </div>
+
+            {/* Cancel Button */}
+            <button
+              onClick={cancelPhoto}
+              disabled={isLoading}
+              className="mt-4 w-full px-6 py-3 bg-white/10 hover:bg-white/20 text-white rounded-xl transition-all disabled:opacity-50"
+            >
+              Cancel
+            </button>
           </div>
         </div>
       )}
@@ -184,7 +334,7 @@ export function PhotoCapture({ onCapture, videoStream, isCapturing = false, clas
             />
             <button
               onClick={captureFromVideo}
-              disabled={isCapturing || isProcessing}
+              disabled={isCapturing || isLoading}
               className="p-3 rounded-xl bg-white/10 border border-white/20 text-white hover:bg-white/20 transition-all disabled:opacity-50"
               title="Take Photo"
             >
@@ -199,7 +349,7 @@ export function PhotoCapture({ onCapture, videoStream, isCapturing = false, clas
         {/* Upload from gallery */}
         <button
           onClick={() => fileInputRef.current?.click()}
-          disabled={isProcessing}
+          disabled={isLoading}
           className="p-3 rounded-xl bg-white/10 border border-white/20 text-white hover:bg-white/20 transition-all disabled:opacity-50"
           title="Upload Photo"
         >
@@ -213,9 +363,3 @@ export function PhotoCapture({ onCapture, videoStream, isCapturing = false, clas
 }
 
 export default PhotoCapture;
-
-
-
-
-
-

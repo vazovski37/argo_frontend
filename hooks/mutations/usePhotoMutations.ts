@@ -4,9 +4,12 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { queryKeys } from "@/lib/query";
 import type { UploadPhotoResponse, DeletePhotoResponse } from "@/lib/schemas/photos";
 
-interface UploadPhotoInput {
+export interface UploadPhotoInput {
   file: File;
-  locationId?: string;
+  latitude: number;
+  longitude: number;
+  visibility: "private" | "group" | "public";
+  groupId?: string;
   caption?: string;
   isSelfie?: boolean;
 }
@@ -14,9 +17,19 @@ interface UploadPhotoInput {
 async function uploadPhoto(input: UploadPhotoInput): Promise<UploadPhotoResponse> {
   const formData = new FormData();
   formData.append("file", input.file);
-  if (input.locationId) formData.append("location_id", input.locationId);
-  if (input.caption) formData.append("caption", input.caption);
-  if (input.isSelfie !== undefined) formData.append("is_selfie", String(input.isSelfie));
+  formData.append("latitude", String(input.latitude));
+  formData.append("longitude", String(input.longitude));
+  formData.append("visibility", input.visibility);
+  
+  if (input.groupId) {
+    formData.append("group_id", input.groupId);
+  }
+  if (input.caption) {
+    formData.append("caption", input.caption);
+  }
+  if (input.isSelfie !== undefined) {
+    formData.append("is_selfie", String(input.isSelfie));
+  }
 
   const response = await fetch("/api/photos/upload", {
     method: "POST",
@@ -55,6 +68,8 @@ export function useUploadPhoto() {
       queryClient.invalidateQueries({ queryKey: queryKeys.photos.all });
       queryClient.invalidateQueries({ queryKey: queryKeys.game.progress() });
       queryClient.invalidateQueries({ queryKey: queryKeys.game.achievements() });
+      // Invalidate feed queries
+      queryClient.invalidateQueries({ queryKey: [queryKeys.photos.all[0], "feed"] });
     },
   });
 }

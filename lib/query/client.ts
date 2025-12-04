@@ -73,6 +73,13 @@ export const queryKeys = {
     all: ["photos"] as const,
     list: () => [...queryKeys.photos.all, "list"] as const,
     byLocation: (locationId: string) => [...queryKeys.photos.all, "location", locationId] as const,
+    feed: (filter?: string, groupId?: string) => [...queryKeys.photos.all, "feed", filter, groupId] as const,
+  },
+  // Groups
+  groups: {
+    all: ["groups"] as const,
+    myGroups: () => [...queryKeys.groups.all, "my-groups"] as const,
+    detail: (id: string) => [...queryKeys.groups.all, "detail", id] as const,
   },
 };
 
