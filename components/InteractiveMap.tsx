@@ -133,8 +133,12 @@ function DirectionsRenderer({
   );
 }
 
+interface MapContentProps {
+  focusedLocationId?: string | null;
+}
+
 // Map Content Component (needs to be inside APIProvider)
-function MapContent() {
+function MapContent({ focusedLocationId }: MapContentProps) {
   const map = useMap();
   const routesLibrary = useMapsLibrary("routes");
   
@@ -144,9 +148,38 @@ function MapContent() {
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
   const [directionsResponse, setDirectionsResponse] = useState<google.maps.DirectionsResult | null>(null);
   const [isRouting, setIsRouting] = useState(false);
+  const [hasFocused, setHasFocused] = useState(false);
 
   // Fetch locations
   const { data: locationsData, isLoading: locationsLoading, error: locationsError } = useLocations();
+  
+  // Auto-focus on location when focusedLocationId is provided
+  useEffect(() => {
+    if (!focusedLocationId || !locationsData?.locations || !map || hasFocused) return;
+
+    const targetLocation = locationsData.locations.find(
+      (loc) => loc.id === focusedLocationId || loc.name.toLowerCase().includes(focusedLocationId.toLowerCase())
+    );
+
+    if (targetLocation && targetLocation.latitude && targetLocation.longitude) {
+      console.log("[Map] Focusing on location:", targetLocation.name);
+      
+      // Pan to the location
+      map.panTo({ lat: targetLocation.latitude, lng: targetLocation.longitude });
+      map.setZoom(16);
+      
+      // Select the location to show info window
+      setSelectedLocation(targetLocation);
+      setHasFocused(true);
+    }
+  }, [focusedLocationId, locationsData, map, hasFocused]);
+
+  // Reset hasFocused when focusedLocationId changes
+  useEffect(() => {
+    if (focusedLocationId) {
+      setHasFocused(false);
+    }
+  }, [focusedLocationId]);
   
   // Visit location mutation
   const visitMutation = useVisitLocation();
@@ -507,13 +540,19 @@ function MapContent() {
   );
 }
 
+// Main Component Props
+export interface InteractiveMapProps {
+  focusedLocationId?: string | null;
+  className?: string;
+}
+
 // Main Component
-export function InteractiveMap() {
+export function InteractiveMap({ focusedLocationId, className }: InteractiveMapProps) {
   const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
 
   if (!apiKey) {
     return (
-      <div className="h-[80vh] w-full flex items-center justify-center bg-slate-100 rounded-xl">
+      <div className={`h-[80vh] w-full flex items-center justify-center bg-slate-100 rounded-xl ${className || ""}`}>
         <div className="text-center p-8">
           <AlertCircle className="w-12 h-12 text-red-500 mx-auto mb-4" />
           <h3 className="text-lg font-semibold text-slate-900 mb-2">Map Configuration Error</h3>
@@ -528,9 +567,9 @@ export function InteractiveMap() {
   }
 
   return (
-    <div className="h-[80vh] w-full rounded-xl overflow-hidden shadow-xl border border-slate-200 relative">
+    <div className={`h-[80vh] w-full rounded-xl overflow-hidden shadow-xl border border-slate-200 relative ${className || ""}`}>
       <APIProvider apiKey={apiKey}>
-        <MapContent />
+        <MapContent focusedLocationId={focusedLocationId} />
       </APIProvider>
     </div>
   );

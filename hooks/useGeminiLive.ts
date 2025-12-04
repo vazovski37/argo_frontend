@@ -30,6 +30,7 @@ export interface ToolHandlers {
   complete_quest_step?: (args: { quest_name: string; step_number: number }) => Promise<{ success: boolean; xp_earned: number; message: string }>;
   get_user_progress?: () => Promise<{ level: number; xp: number; rank: string; locations_visited: number }>;
   get_knowledge?: (args: { query: string }) => Promise<{ found: boolean; context: string; sources: string[] }>;
+  display_location_on_map?: (args: { location_id: string }) => Promise<{ success: boolean; message: string }>;
 }
 
 interface UseGeminiLiveOptions {
@@ -182,6 +183,20 @@ const GAME_TOOLS: { functionDeclarations: FunctionDeclaration[] } = {
           }
         },
         required: ["query"]
+      }
+    },
+    {
+      name: "display_location_on_map",
+      description: "Show a specific location on an interactive map for the user. Use this when the user asks to see a place on the map, wants directions, or when you're describing a location and want to show them where it is. This opens a map drawer focused on the specified location.",
+      parameters: {
+        type: Type.OBJECT,
+        properties: {
+          location_id: {
+            type: Type.STRING,
+            description: "The ID or name of the location to display on the map (e.g., 'poti-lighthouse', 'Poti Lighthouse', 'argonauts-monument', 'Paliastomi Lake')"
+          }
+        },
+        required: ["location_id"]
       }
     }
   ]
@@ -457,6 +472,11 @@ export function useGeminiLive(options: UseGeminiLiveOptions) {
                     case "get_knowledge":
                       if (toolHandlers.get_knowledge) {
                         result = await toolHandlers.get_knowledge(args as { query: string });
+                      }
+                      break;
+                    case "display_location_on_map":
+                      if (toolHandlers.display_location_on_map) {
+                        result = await toolHandlers.display_location_on_map(args as { location_id: string });
                       }
                       break;
                   }

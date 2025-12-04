@@ -18,6 +18,7 @@ import { GameProgressBar } from "@/components/GameProgressBar";
 import { PhotoCapture } from "@/components/PhotoCapture";
 import { AchievementToast } from "@/components/AchievementToast";
 import { GameActions } from "@/components/GameActions";
+import { MapDrawer, mapDrawerController } from "@/components/MapDrawer";
 import Link from "next/link";
 
 const GEMINI_API_KEY = process.env.NEXT_PUBLIC_GEMINI_API_KEY || "";
@@ -342,6 +343,33 @@ When the user asks to learn Georgian, teach them a phrase and then call learn_ph
         console.error("[TOOL HANDLER] ❌ RAG query error:", error);
         return { found: false, context: "", sources: [] };
       }
+    },
+    
+    display_location_on_map: async (args) => {
+      console.log("[TOOL HANDLER] 🗺️ display_location_on_map called:", args.location_id);
+      
+      // Try to find the location by ID or name
+      const location = locations.find(l => 
+        l.id === args.location_id ||
+        l.name.toLowerCase().includes(args.location_id.toLowerCase()) ||
+        args.location_id.toLowerCase().includes(l.name.toLowerCase())
+      );
+      
+      if (!location) {
+        console.warn("[TOOL HANDLER] ⚠️ Location not found:", args.location_id);
+        return { 
+          success: false, 
+          message: `Location "${args.location_id}" not found in database. Try using a known location name.` 
+        };
+      }
+      
+      // Open the map drawer focused on this location
+      mapDrawerController.open(location.id);
+      
+      return { 
+        success: true, 
+        message: `Showing ${location.name} on the map. The user can now see its location and get directions.` 
+      };
     },
   }), [locations, visitedLocationIds, visitLocationMutation, learnPhraseMutation, startQuestMutation, quests, userQuests, gameState, achievements, showAchievement]);
 
@@ -852,6 +880,9 @@ When the user asks to learn Georgian, teach them a phrase and then call learn_ph
           </div>
         </div>
       </main>
+
+      {/* Map Drawer - controlled by AI via display_location_on_map tool */}
+      <MapDrawer />
     </div>
   );
 }
