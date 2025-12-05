@@ -143,7 +143,7 @@ interface MapContentProps {
 function MapContent({ focusedLocationId }: MapContentProps) {
   const map = useMap();
   const routesLibrary = useMapsLibrary("routes");
-  
+
   const [userPos, setUserPos] = useState<UserPosition | null>(null);
   const [selectedLocation, setSelectedLocation] = useState<Location | null>(null);
   const [selectedPhoto, setSelectedPhoto] = useState<Photo | null>(null);
@@ -155,10 +155,10 @@ function MapContent({ focusedLocationId }: MapContentProps) {
 
   // Fetch locations
   const { data: locationsData, isLoading: locationsLoading, error: locationsError } = useLocations();
-  
+
   // Fetch photos
   const { data: photosData } = usePhotoFeed("all");
-  
+
   // Auto-focus on location when focusedLocationId is provided
   useEffect(() => {
     if (!focusedLocationId || !locationsData?.locations || !map || hasFocused) return;
@@ -169,11 +169,11 @@ function MapContent({ focusedLocationId }: MapContentProps) {
 
     if (targetLocation && targetLocation.latitude && targetLocation.longitude) {
       console.log("[Map] Focusing on location:", targetLocation.name);
-      
+
       // Pan to the location
       map.panTo({ lat: targetLocation.latitude, lng: targetLocation.longitude });
       map.setZoom(16);
-      
+
       // Select the location to show info window
       setSelectedLocation(targetLocation);
       setHasFocused(true);
@@ -186,7 +186,7 @@ function MapContent({ focusedLocationId }: MapContentProps) {
       setHasFocused(false);
     }
   }, [focusedLocationId]);
-  
+
   // Visit location mutation
   const visitMutation = useVisitLocation();
 
@@ -262,7 +262,7 @@ function MapContent({ focusedLocationId }: MapContentProps) {
 
     try {
       const result = await visitMutation.mutateAsync({ locationId: location.id });
-      
+
       if (result.success) {
         setCheckedInLocations((prev) => new Set([...prev, location.id]));
         setToast({
@@ -292,7 +292,7 @@ function MapContent({ focusedLocationId }: MapContentProps) {
 
     try {
       const directionsService = new routesLibrary.DirectionsService();
-      
+
       const result = await directionsService.route({
         origin: { lat: userPos.lat, lng: userPos.lng },
         destination: { lat: selectedLocation.latitude, lng: selectedLocation.longitude },
@@ -355,7 +355,7 @@ function MapContent({ focusedLocationId }: MapContentProps) {
         {/* Quest Location Markers (Gold Pins) */}
         {locations.map((location) => {
           if (!location.latitude || !location.longitude) return null;
-          
+
           const colors = getMarkerColors(location.category);
           const isCheckedIn = checkedInLocations.has(location.id);
 
@@ -483,13 +483,12 @@ function MapContent({ focusedLocationId }: MapContentProps) {
                 </div>
                 {/* Visibility Badge */}
                 <div
-                  className={`px-2 py-1 rounded-full text-xs font-medium ${
-                    selectedPhoto.visibility === "private"
+                  className={`px-2 py-1 rounded-full text-xs font-medium ${selectedPhoto.visibility === "private"
                       ? "bg-blue-100 text-blue-700"
                       : selectedPhoto.visibility === "group"
-                      ? "bg-green-100 text-green-700"
-                      : "bg-slate-100 text-slate-700"
-                  }`}
+                        ? "bg-green-100 text-green-700"
+                        : "bg-slate-100 text-slate-700"
+                    }`}
                 >
                   {selectedPhoto.visibility === "private" && "🔒"}
                   {selectedPhoto.visibility === "group" && "👥"}
@@ -626,19 +625,18 @@ function MapContent({ focusedLocationId }: MapContentProps) {
       </Map>
 
       {/* Directions Renderer */}
-      <DirectionsRenderer 
-        directions={directionsResponse} 
-        onClear={() => setDirectionsResponse(null)} 
+      <DirectionsRenderer
+        directions={directionsResponse}
+        onClear={() => setDirectionsResponse(null)}
       />
 
       {/* Toast Notification */}
       {toast && (
         <div
-          className={`absolute top-4 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2 px-4 py-3 rounded-xl shadow-lg backdrop-blur-sm ${
-            toast.type === "success"
+          className={`absolute top-4 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2 px-4 py-3 rounded-xl shadow-lg backdrop-blur-sm ${toast.type === "success"
               ? "bg-green-500/95 text-white"
               : "bg-red-500/95 text-white"
-          }`}
+            }`}
         >
           {toast.type === "success" ? (
             <CheckCircle className="w-5 h-5" />

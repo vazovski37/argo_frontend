@@ -60,32 +60,32 @@ export default function LivePage() {
   const uploadPhotoMutation = useUploadPhoto();
 
   // Transform data for components
-  const achievements = useMemo(() => 
-    achievementsData?.achievements || [], 
+  const achievements = useMemo(() =>
+    achievementsData?.achievements || [],
     [achievementsData]
   );
-  
-  const userAchievements = useMemo(() => 
+
+  const userAchievements = useMemo(() =>
     achievements.filter(a => a.earned).map(a => a.id),
     [achievements]
   );
-  
-  const locations = useMemo(() => 
+
+  const locations = useMemo(() =>
     locationsData?.locations || [],
     [locationsData]
   );
-  
-  const visitedLocationIds = useMemo(() => 
+
+  const visitedLocationIds = useMemo(() =>
     visitedData?.visits?.map(v => v.location_id) || [],
     [visitedData]
   );
-  
-  const quests = useMemo(() => 
+
+  const quests = useMemo(() =>
     questsData?.quests || [],
     [questsData]
   );
-  
-  const userQuests = useMemo(() => 
+
+  const userQuests = useMemo(() =>
     [...(userQuestsData?.active || []), ...(userQuestsData?.completed || [])],
     [userQuestsData]
   );
@@ -119,7 +119,7 @@ export default function LivePage() {
   // Visit location handler
   const handleVisitLocation = useCallback(async (locationId: string) => {
     const result = await visitLocationMutation.mutateAsync({ locationId });
-    
+
     // Show achievement notifications
     if (result.new_achievements?.length > 0) {
       result.new_achievements.forEach((ach: any) => {
@@ -210,23 +210,23 @@ When the user asks to learn Georgian, teach them a phrase and then call learn_ph
   const toolHandlers: ToolHandlers = useMemo(() => ({
     visit_location: async (args) => {
       console.log("[TOOL HANDLER] 📍 visit_location called:", args.location_name);
-      
-      const location = locations.find(l => 
+
+      const location = locations.find(l =>
         l.name.toLowerCase().includes(args.location_name.toLowerCase()) ||
         args.location_name.toLowerCase().includes(l.name.toLowerCase())
       );
-      
+
       if (!location) {
         return { success: false, xp_earned: 0, message: `Location "${args.location_name}" not found.` };
       }
-      
+
       if (visitedLocationIds.includes(location.id)) {
         return { success: true, xp_earned: 0, message: `You've already visited ${location.name}!` };
       }
-      
+
       try {
         const result = await visitLocationMutation.mutateAsync({ locationId: location.id });
-        
+
         if (result.new_achievements?.length > 0) {
           result.new_achievements.forEach((ach: any) => {
             const achievement = achievements.find(a => a.name === ach.name);
@@ -241,53 +241,53 @@ When the user asks to learn Georgian, teach them a phrase and then call learn_ph
             }
           });
         }
-        
-        return { 
-          success: true, 
-          xp_earned: result.xp_earned, 
+
+        return {
+          success: true,
+          xp_earned: result.xp_earned,
           message: result.message,
         };
       } catch (err) {
         return { success: false, xp_earned: 0, message: "Failed to record visit." };
       }
     },
-    
+
     learn_phrase: async (args) => {
       console.log("[TOOL HANDLER] 🗣️ learn_phrase called:", args.phrase);
-      
+
       if (gameState?.phrasesLearned.includes(args.phrase)) {
         return { success: true, xp_earned: 0, message: `You've already learned "${args.phrase}"!` };
       }
-      
+
       try {
         const result = await learnPhraseMutation.mutateAsync({ phrase: args.phrase, meaning: args.meaning });
-        return { 
-          success: result.success, 
-          xp_earned: result.xp_earned || 10, 
-          message: `Great job learning "${args.phrase}"! Earned ${result.xp_earned || 10} XP.` 
+        return {
+          success: result.success,
+          xp_earned: result.xp_earned || 10,
+          message: `Great job learning "${args.phrase}"! Earned ${result.xp_earned || 10} XP.`
         };
       } catch (err) {
         return { success: false, xp_earned: 0, message: "Failed to save phrase." };
       }
     },
-    
+
     start_quest: async (args) => {
       console.log("[TOOL HANDLER] 📜 start_quest called:", args.quest_name);
-      
-      const quest = quests.find(q => 
-        q.name.toLowerCase().includes(args.quest_name.toLowerCase()) || 
+
+      const quest = quests.find(q =>
+        q.name.toLowerCase().includes(args.quest_name.toLowerCase()) ||
         args.quest_name.toLowerCase().includes(q.name.toLowerCase())
       );
-      
+
       if (!quest) {
         return { success: false, message: `Quest "${args.quest_name}" not found.` };
       }
-      
+
       const existingQuest = userQuests.find(uq => uq.quest_id === quest.id);
       if (existingQuest) {
         return { success: true, message: `You've already ${existingQuest.status === 'completed' ? 'completed' : 'started'} "${quest.name}".` };
       }
-      
+
       try {
         await startQuestMutation.mutateAsync(quest.id);
         return { success: true, message: `Quest "${quest.name}" has begun! ${quest.story_intro || ''}` };
@@ -295,7 +295,7 @@ When the user asks to learn Georgian, teach them a phrase and then call learn_ph
         return { success: false, message: "Failed to start quest." };
       }
     },
-    
+
     get_user_progress: async () => {
       return {
         level: gameState?.currentLevel || 1,
@@ -308,32 +308,32 @@ When the user asks to learn Georgian, teach them a phrase and then call learn_ph
         phrases_learned: gameState?.phrasesLearned.length || 0,
       };
     },
-    
+
     get_knowledge: async (args) => {
       console.log("[TOOL HANDLER] 📚 get_knowledge called:", args.query);
-      
+
       try {
         const response = await fetch("/api/rag/context", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ query: args.query, max_chunks: 5 }),
         });
-        
+
         if (!response.ok) {
           console.error("[TOOL HANDLER] ❌ RAG query failed:", response.status);
           return { found: false, context: "", sources: [] };
         }
-        
+
         const data = await response.json();
         console.log("[TOOL HANDLER] 📖 RAG context received, source:", data.source);
-        
+
         // Extract source names from the context
         const sourceMatches = data.context.match(/\*\*Source \d+\*\* \(([^)]+)\)/g) || [];
         const sources = sourceMatches.map((m: string) => {
           const match = m.match(/\(([^)]+)\)/);
           return match ? match[1] : "Unknown";
         });
-        
+
         return {
           found: data.context.length > 0,
           context: data.context,
@@ -344,31 +344,31 @@ When the user asks to learn Georgian, teach them a phrase and then call learn_ph
         return { found: false, context: "", sources: [] };
       }
     },
-    
+
     display_location_on_map: async (args) => {
       console.log("[TOOL HANDLER] 🗺️ display_location_on_map called:", args.location_id);
-      
+
       // Try to find the location by ID or name
-      const location = locations.find(l => 
+      const location = locations.find(l =>
         l.id === args.location_id ||
         l.name.toLowerCase().includes(args.location_id.toLowerCase()) ||
         args.location_id.toLowerCase().includes(l.name.toLowerCase())
       );
-      
+
       if (!location) {
         console.warn("[TOOL HANDLER] ⚠️ Location not found:", args.location_id);
-        return { 
-          success: false, 
-          message: `Location "${args.location_id}" not found in database. Try using a known location name.` 
+        return {
+          success: false,
+          message: `Location "${args.location_id}" not found in database. Try using a known location name.`
         };
       }
-      
+
       // Open the map drawer focused on this location
       mapDrawerController.open(location.id);
-      
-      return { 
-        success: true, 
-        message: `Showing ${location.name} on the map. The user can now see its location and get directions.` 
+
+      return {
+        success: true,
+        message: `Showing ${location.name} on the map. The user can now see its location and get directions.`
       };
     },
   }), [locations, visitedLocationIds, visitLocationMutation, learnPhraseMutation, startQuestMutation, quests, userQuests, gameState, achievements, showAchievement]);
@@ -422,7 +422,7 @@ When the user asks to learn Georgian, teach them a phrase and then call learn_ph
 
       if (videoRef.current && videoTracks.length > 0) {
         videoRef.current.srcObject = mediaStream;
-        videoRef.current.play().catch(() => {});
+        videoRef.current.play().catch(() => { });
       }
     } else {
       setHasVideo(false);
@@ -456,7 +456,7 @@ When the user asks to learn Georgian, teach them a phrase and then call learn_ph
   useEffect(() => {
     const processNewMessages = async () => {
       if (messages.length === 0) return;
-      
+
       const lastMessage = messages[messages.length - 1];
       if (lastProcessedMessageRef.current === lastMessage.id) return;
       lastProcessedMessageRef.current = lastMessage.id;
@@ -597,13 +597,12 @@ When the user asks to learn Georgian, teach them a phrase and then call learn_ph
           <div className="flex items-center gap-3">
             <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/5 border border-white/10">
               <div
-                className={`w-2 h-2 rounded-full ${
-                  isConnected
+                className={`w-2 h-2 rounded-full ${isConnected
                     ? "bg-green-400 animate-pulse"
                     : isConnecting
-                    ? "bg-yellow-400 animate-pulse"
-                    : "bg-slate-500"
-                }`}
+                      ? "bg-yellow-400 animate-pulse"
+                      : "bg-slate-500"
+                  }`}
               ></div>
               <span className="text-sm text-slate-400 hidden sm:inline">
                 {isConnected ? "Live" : isConnecting ? "Connecting..." : "Offline"}
@@ -635,9 +634,8 @@ When the user asks to learn Georgian, teach them a phrase and then call learn_ph
         <div className="flex gap-4 h-[calc(100vh-100px)]">
           {/* Left Sidebar */}
           <div
-            className={`${
-              showSidebar ? "block" : "hidden"
-            } lg:block w-full lg:w-72 flex-shrink-0 space-y-4 absolute lg:relative inset-0 lg:inset-auto z-20 lg:z-auto bg-slate-900/95 lg:bg-transparent p-4 lg:p-0 overflow-y-auto`}
+            className={`${showSidebar ? "block" : "hidden"
+              } lg:block w-full lg:w-72 flex-shrink-0 space-y-4 absolute lg:relative inset-0 lg:inset-auto z-20 lg:z-auto bg-slate-900/95 lg:bg-transparent p-4 lg:p-0 overflow-y-auto`}
           >
             <button
               onClick={() => setShowSidebar(false)}
@@ -704,9 +702,8 @@ When the user asks to learn Georgian, teach them a phrase and then call learn_ph
                 autoPlay
                 playsInline
                 muted
-                className={`absolute inset-0 w-full h-full object-cover ${
-                  !mediaStream || !isVideoEnabled || !hasVideo ? "opacity-0" : ""
-                }`}
+                className={`absolute inset-0 w-full h-full object-cover ${!mediaStream || !isVideoEnabled || !hasVideo ? "opacity-0" : ""
+                  }`}
               />
 
               {!isConnected && !isConnecting && !mediaStream ? (
@@ -778,11 +775,10 @@ When the user asks to learn Georgian, teach them a phrase and then call learn_ph
               <div className="flex items-center justify-center gap-3">
                 <button
                   onClick={toggleMute}
-                  className={`p-4 rounded-2xl transition-all duration-300 ${
-                    isMuted
+                  className={`p-4 rounded-2xl transition-all duration-300 ${isMuted
                       ? "bg-red-500/20 border border-red-500/30 text-red-400"
                       : "bg-white/10 border border-white/20 text-white hover:bg-white/20"
-                  }`}
+                    }`}
                 >
                   {isMuted ? (
                     <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -798,11 +794,10 @@ When the user asks to learn Georgian, teach them a phrase and then call learn_ph
 
                 <button
                   onClick={toggleVideo}
-                  className={`p-4 rounded-2xl transition-all duration-300 ${
-                    !isVideoEnabled
+                  className={`p-4 rounded-2xl transition-all duration-300 ${!isVideoEnabled
                       ? "bg-red-500/20 border border-red-500/30 text-red-400"
                       : "bg-white/10 border border-white/20 text-white hover:bg-white/20"
-                  }`}
+                    }`}
                 >
                   <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
@@ -842,11 +837,10 @@ When the user asks to learn Georgian, teach them a phrase and then call learn_ph
                 messages.map((message) => (
                   <div key={message.id} className={`flex ${message.role === "user" ? "justify-end" : "justify-start"}`}>
                     <div
-                      className={`max-w-[85%] px-3 py-2 rounded-2xl ${
-                        message.role === "user"
+                      className={`max-w-[85%] px-3 py-2 rounded-2xl ${message.role === "user"
                           ? "bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white"
                           : "bg-white/10 text-slate-200"
-                      }`}
+                        }`}
                     >
                       <p className="text-sm leading-relaxed">{message.content}</p>
                       <p className={`text-xs mt-1 ${message.role === "user" ? "text-white/60" : "text-slate-500"}`}>
