@@ -1,8 +1,10 @@
 "use client";
 
+import type React from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useRouter } from "next/navigation";
 import { useState, useEffect, useCallback } from "react";
+import Image from "next/image";
 
 declare global {
   interface Window {
@@ -41,8 +43,14 @@ export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [name, setName] = useState("");
-  
-  const { googleLogin, login, register, isAuthenticated, isLoading: authLoading } = useAuth();
+
+  const {
+    googleLogin,
+    login,
+    register,
+    isAuthenticated,
+    isLoading: authLoading,
+  } = useAuth();
   const router = useRouter();
 
   // Redirect if already authenticated
@@ -53,19 +61,22 @@ export default function LoginPage() {
   }, [isAuthenticated, authLoading, router]);
 
   // Handle Google credential response
-  const handleGoogleResponse = useCallback(async (response: { credential: string }) => {
-    setIsLoading(true);
-    setError("");
-    
-    const result = await googleLogin(response.credential);
-    
-    if (result.success) {
-      router.push("/");
-    } else {
-      setError(result.error || "Google login failed");
-      setIsLoading(false);
-    }
-  }, [googleLogin, router]);
+  const handleGoogleResponse = useCallback(
+    async (response: { credential: string }) => {
+      setIsLoading(true);
+      setError("");
+
+      const result = await googleLogin(response.credential);
+
+      if (result.success) {
+        router.push("/");
+      } else {
+        setError(result.error || "Google login failed");
+        setIsLoading(false);
+      }
+    },
+    [googleLogin, router]
+  );
 
   // Initialize Google Sign-In
   useEffect(() => {
@@ -127,39 +138,63 @@ export default function LoginPage() {
 
   if (authLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900">
-        <div className="w-8 h-8 border-2 border-purple-500 border-t-transparent rounded-full animate-spin"></div>
+      <div className="min-h-screen flex items-center justify-center bg-slate-950">
+        <div className="w-8 h-8 border-2 border-sky-400 border-t-transparent rounded-full animate-spin" />
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900">
-      {/* Ambient background effects */}
-      <div className="absolute inset-0 overflow-hidden">
-        <div className="absolute -top-40 -right-40 w-80 h-80 bg-purple-500 rounded-full mix-blend-multiply filter blur-3xl opacity-20 animate-pulse"></div>
-        <div className="absolute -bottom-40 -left-40 w-80 h-80 bg-cyan-500 rounded-full mix-blend-multiply filter blur-3xl opacity-20 animate-pulse delay-1000"></div>
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-96 h-96 bg-fuchsia-500 rounded-full mix-blend-multiply filter blur-3xl opacity-10"></div>
+    <div className="relative min-h-screen flex items-center justify-center overflow-hidden bg-slate-950">
+      {/* Background image of Poti */}
+      <div className="absolute inset-0">
+        <Image
+          src="/potiView.png"
+          alt="Poti seaside view"
+          fill
+          priority
+          className="object-cover"
+        />
+        {/* Blue sea overlay */}
+        <div className="absolute inset-0 bg-gradient-to-br from-slate-950/85 via-sky-950/80 to-slate-950/90" />
       </div>
 
-      <div className="relative z-10 w-full max-w-md px-6">
-        {/* Logo/Brand */}
+      {/* Subtle light beams / overlay accents */}
+      <div className="pointer-events-none absolute inset-0">
+        <div className="absolute -top-40 -right-32 w-72 h-72 bg-sky-500/25 blur-3xl rounded-full" />
+        <div className="absolute -bottom-40 -left-24 w-72 h-72 bg-cyan-400/20 blur-3xl rounded-full" />
+        <div className="absolute top-1/2 left-1/4 w-64 h-64 bg-blue-500/15 blur-3xl rounded-full" />
+      </div>
+
+      {/* Content */}
+      <div className="relative z-10 w-full max-w-md px-6 py-10">
+        {/* Logo / brand */}
         <div className="text-center mb-10">
-          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-br from-violet-500 to-fuchsia-500 shadow-lg shadow-purple-500/30 mb-6">
-            <span className="text-3xl">⚓</span>
+          <div className="mx-auto mb-5 flex items-center justify-center w-20 h-20 rounded-3xl bg-slate-900/70 border border-sky-500/30 shadow-xl shadow-sky-900/50">
+            <Image
+              src="/logo.png"
+              alt="Argonauts logo"
+              width={56}
+              height={56}
+              className="object-contain"
+              priority
+            />
           </div>
-          <h1 className="text-3xl font-bold text-white tracking-tight">
+
+          <h1 className="text-3xl font-semibold text-white tracking-tight">
             Welcome to Argonauts
           </h1>
-          <p className="mt-3 text-slate-400 text-sm">
-            {isRegister ? "Create an account to start your journey" : "Sign in to continue your journey"}
+          <p className="mt-3 text-slate-300 text-sm">
+            {isRegister
+              ? "Create an account to start your journey in Poti."
+              : "Sign in to continue exploring Poti and beyond."}
           </p>
         </div>
 
-        {/* Login Card */}
-        <div className="backdrop-blur-xl bg-white/5 border border-white/10 rounded-3xl p-8 shadow-2xl">
+        {/* Card */}
+        <div className="backdrop-blur-2xl bg-slate-950/70 border border-sky-500/20 rounded-3xl p-8 shadow-2xl shadow-slate-950/80">
           {error && (
-            <div className="mb-4 p-3 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-sm">
+            <div className="mb-4 p-3 rounded-xl bg-red-500/10 border border-red-500/30 text-red-300 text-sm">
               {error}
             </div>
           )}
@@ -169,10 +204,10 @@ export default function LoginPage() {
               {/* Google Sign-In Button */}
               {GOOGLE_CLIENT_ID ? (
                 <div className="flex justify-center mb-4">
-                  <div id="google-signin-button" className="w-full"></div>
+                  <div id="google-signin-button" className="w-full" />
                 </div>
               ) : (
-                <div className="mb-4 p-3 rounded-xl bg-yellow-500/10 border border-yellow-500/20 text-yellow-400 text-sm text-center">
+                <div className="mb-4 p-3 rounded-xl bg-yellow-500/10 border border-yellow-500/30 text-yellow-200 text-sm text-center">
                   Google Sign-In not configured
                 </div>
               )}
@@ -180,10 +215,10 @@ export default function LoginPage() {
               {/* Or Divider */}
               <div className="relative my-6">
                 <div className="absolute inset-0 flex items-center">
-                  <div className="w-full border-t border-white/10"></div>
+                  <div className="w-full border-t border-slate-600/60" />
                 </div>
-                <div className="relative flex justify-center text-sm">
-                  <span className="px-4 bg-transparent text-slate-500 text-xs uppercase tracking-wider">
+                <div className="relative flex justify-center text-xs uppercase tracking-[0.2em]">
+                  <span className="px-4 bg-slate-950/70 text-slate-400">
                     Or continue with email
                   </span>
                 </div>
@@ -193,47 +228,53 @@ export default function LoginPage() {
               <button
                 onClick={() => setShowEmailForm(true)}
                 disabled={isLoading}
-                className="w-full py-3 px-6 bg-white/10 hover:bg-white/20 text-white font-medium rounded-2xl transition-all duration-300 border border-white/10 hover:border-white/20 disabled:opacity-50"
+                className="w-full py-3 px-6 bg-sky-500/80 hover:bg-sky-400 text-slate-950 font-medium rounded-2xl transition-all duration-300 border border-sky-300/70 disabled:opacity-60"
               >
-                Sign in with Email
+                Continue with Email
               </button>
             </>
           ) : (
             <form onSubmit={handleEmailSubmit} className="space-y-4">
               {isRegister && (
                 <div>
-                  <label className="block text-sm text-slate-400 mb-1">Name</label>
+                  <label className="block text-sm text-slate-300 mb-1">
+                    Name
+                  </label>
                   <input
                     type="text"
                     value={name}
                     onChange={(e) => setName(e.target.value)}
-                    className="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-purple-500/50"
+                    className="w-full px-4 py-3 bg-slate-900/70 border border-slate-600/80 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-sky-500/60"
                     placeholder="Your name"
                   />
                 </div>
               )}
-              
+
               <div>
-                <label className="block text-sm text-slate-400 mb-1">Email</label>
+                <label className="block text-sm text-slate-300 mb-1">
+                  Email
+                </label>
                 <input
                   type="email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   required
-                  className="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-purple-500/50"
+                  className="w-full px-4 py-3 bg-slate-900/70 border border-slate-600/80 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-sky-500/60"
                   placeholder="you@example.com"
                 />
               </div>
 
               <div>
-                <label className="block text-sm text-slate-400 mb-1">Password</label>
+                <label className="block text-sm text-slate-300 mb-1">
+                  Password
+                </label>
                 <input
                   type="password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   required
                   minLength={6}
-                  className="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-purple-500/50"
+                  className="w-full px-4 py-3 bg-slate-900/70 border border-slate-600/80 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-sky-500/60"
                   placeholder="••••••••"
                 />
               </div>
@@ -241,53 +282,64 @@ export default function LoginPage() {
               <button
                 type="submit"
                 disabled={isLoading}
-                className="w-full py-3 px-6 bg-gradient-to-r from-violet-600 to-fuchsia-600 hover:from-violet-500 hover:to-fuchsia-500 text-white font-medium rounded-2xl transition-all duration-300 disabled:opacity-50"
+                className="w-full py-3 px-6 bg-gradient-to-r from-sky-500 to-cyan-400 hover:from-sky-400 hover:to-cyan-300 text-slate-950 font-semibold rounded-2xl transition-all duration-300 disabled:opacity-60"
               >
                 {isLoading ? (
                   <span className="flex items-center justify-center gap-2">
-                    <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                    <div className="w-4 h-4 border-2 border-slate-900/40 border-t-slate-900 rounded-full animate-spin" />
                     {isRegister ? "Creating account..." : "Signing in..."}
                   </span>
+                ) : isRegister ? (
+                  "Create Account"
                 ) : (
-                  isRegister ? "Create Account" : "Sign In"
+                  "Sign In"
                 )}
               </button>
 
-              <div className="flex items-center justify-between text-sm">
+              <div className="flex items-center justify-between text-sm pt-1">
                 <button
                   type="button"
                   onClick={() => setShowEmailForm(false)}
-                  className="text-slate-400 hover:text-white transition-colors"
+                  className="text-slate-400 hover:text-slate-200 transition-colors"
                 >
                   ← Back
                 </button>
                 <button
                   type="button"
                   onClick={() => setIsRegister(!isRegister)}
-                  className="text-purple-400 hover:text-purple-300 transition-colors"
+                  className="text-sky-300 hover:text-sky-200 transition-colors"
                 >
-                  {isRegister ? "Already have an account?" : "Need an account?"}
+                  {isRegister
+                    ? "Already have an account?"
+                    : "Need an account?"}
                 </button>
               </div>
             </form>
           )}
 
           {/* Info */}
-          <p className="mt-6 text-center text-slate-500 text-xs leading-relaxed">
+          <p className="mt-6 text-center text-slate-400 text-xs leading-relaxed">
             By continuing, you agree to our{" "}
-            <a href="#" className="text-purple-400 hover:text-purple-300 transition-colors">
+            <a
+              href="#"
+              className="text-sky-300 hover:text-sky-200 underline-offset-2 hover:underline"
+            >
               Terms of Service
             </a>{" "}
             and{" "}
-            <a href="#" className="text-purple-400 hover:text-purple-300 transition-colors">
+            <a
+              href="#"
+              className="text-sky-300 hover:text-sky-200 underline-offset-2 hover:underline"
+            >
               Privacy Policy
             </a>
+            .
           </p>
         </div>
 
         {/* Footer */}
-        <p className="mt-8 text-center text-slate-600 text-xs">
-          Powered by Flask & Next.js
+        <p className="mt-6 text-center text-slate-400 text-xs">
+          Powered by Flask &amp; Next.js • Made in Poti
         </p>
       </div>
     </div>
