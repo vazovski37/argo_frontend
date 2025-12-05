@@ -69,23 +69,69 @@ export function PhotoCapture({
     const video = videoRef.current;
     const canvas = canvasRef.current;
     
-    canvas.width = video.videoWidth || 640;
-    canvas.height = video.videoHeight || 480;
+    // Ensure video is playing
+    try {
+      if (video.paused) {
+        await video.play();
+      }
+    } catch (error) {
+      console.error("Error playing video:", error);
+    }
     
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
+    // Wait for video to have valid dimensions and be ready
+    let attempts = 0;
+    while ((video.videoWidth === 0 || video.videoHeight === 0) && attempts < 10) {
+      await new Promise(resolve => setTimeout(resolve, 100));
+      attempts++;
+    }
     
-    ctx.drawImage(video, 0, 0);
+    // Check if video has valid dimensions
+    const videoWidth = video.videoWidth;
+    const videoHeight = video.videoHeight;
     
+    if (videoWidth === 0 || videoHeight === 0) {
+      console.error("Video dimensions are invalid:", videoWidth, videoHeight, "readyState:", video.readyState);
+      alert("Camera not ready. Please wait a moment and try again.");
+      return;
+    }
+    
+    // Set canvas dimensions to match video
+    canvas.width = videoWidth;
+    canvas.height = videoHeight;
+    
+    const ctx = canvas.getContext("2d", { willReadFrequently: false });
+    if (!ctx) {
+      console.error("Failed to get canvas context");
+      return;
+    }
+    
+    // Draw video frame to canvas
+    try {
+      ctx.drawImage(video, 0, 0, videoWidth, videoHeight);
+    } catch (error) {
+      console.error("Error drawing video to canvas:", error);
+      alert("Failed to capture photo. Please try again.");
+      return;
+    }
+
     // Convert to blob
     canvas.toBlob(async (blob) => {
-      if (!blob) return;
+      if (!blob) {
+        console.error("Failed to create blob from canvas");
+        alert("Failed to process photo. Please try again.");
+        return;
+      }
+      
+      // Verify blob has content (not empty/black)
+      if (blob.size < 1000) {
+        console.warn("Blob size is very small, might be black image:", blob.size);
+      }
       
       const file = new File([blob], `photo_${Date.now()}.jpg`, { type: "image/jpeg" });
       capturedFileRef.current = file;
       setPreviewUrl(URL.createObjectURL(blob));
       setShowPreview(true);
-    }, "image/jpeg", 0.9);
+    }, "image/jpeg", 0.95);
   }, [videoStream]);
 
   // Handle file upload
@@ -159,10 +205,17 @@ export function PhotoCapture({
     setTimeout(() => setCopied(false), 2000);
   }, []);
 
-  // Attach video stream
+  // Attach video stream and ensure it's playing
   useEffect(() => {
-    if (videoRef.current && videoStream && videoRef.current.srcObject !== videoStream) {
-      videoRef.current.srcObject = videoStream;
+    if (videoRef.current && videoStream) {
+      if (videoRef.current.srcObject !== videoStream) {
+        videoRef.current.srcObject = videoStream;
+      }
+      
+      // Ensure video is playing
+      videoRef.current.play().catch((error) => {
+        console.error("Error playing video:", error);
+      });
     }
   }, [videoStream]);
 
@@ -189,11 +242,11 @@ export function PhotoCapture({
           <div className="relative max-w-lg w-full max-h-[90vh] overflow-y-auto">
             {/* Preview Image */}
             <div className="relative mb-4">
-              <img 
-                src={previewUrl} 
-                alt="Preview" 
-                className="w-full rounded-2xl shadow-2xl"
-              />
+            <img 
+              src={previewUrl} 
+              alt="Preview" 
+              className="w-full rounded-2xl shadow-2xl"
+            />
               {locationError && (
                 <div className="absolute top-2 left-2 right-2 bg-red-500/90 text-white text-xs p-2 rounded-lg">
                   {locationError}
