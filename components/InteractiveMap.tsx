@@ -140,7 +140,7 @@ interface MapContentProps {
 }
 
 // Map Content Component (needs to be inside APIProvider)
-function MapContent({ focusedLocationId }: MapContentProps) {
+function MapContent({ focusedLocationId, photoFilter = "all" }: MapContentProps & { photoFilter?: string }) {
   const map = useMap();
   const routesLibrary = useMapsLibrary("routes");
 
@@ -157,7 +157,7 @@ function MapContent({ focusedLocationId }: MapContentProps) {
   const { data: locationsData, isLoading: locationsLoading, error: locationsError } = useLocations();
 
   // Fetch photos
-  const { data: photosData } = usePhotoFeed("all");
+  const { data: photosData } = usePhotoFeed(photoFilter as any);
 
   // Auto-focus on location when focusedLocationId is provided
   useEffect(() => {
@@ -680,10 +680,11 @@ function MapContent({ focusedLocationId }: MapContentProps) {
 export interface InteractiveMapProps {
   focusedLocationId?: string | null;
   className?: string;
+  photoFilter?: "all" | "private" | "group";
 }
 
 // Main Component
-export function InteractiveMap({ focusedLocationId, className }: InteractiveMapProps) {
+export function InteractiveMap({ focusedLocationId, className, photoFilter = "all" }: InteractiveMapProps) {
   const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
 
   if (!apiKey) {
@@ -703,13 +704,12 @@ export function InteractiveMap({ focusedLocationId, className }: InteractiveMapP
   }
 
   return (
-    <div className={`h-[80vh] w-full rounded-xl overflow-hidden shadow-xl border border-slate-200 relative ${className || ""}`}>
+    <div className={`h-full w-full rounded-xl overflow-hidden shadow-xl border border-slate-200 relative ${className || ""}`}>
       <APIProvider apiKey={apiKey}>
-        <MapContent focusedLocationId={focusedLocationId} />
+        <MapContent focusedLocationId={focusedLocationId} photoFilter={photoFilter} />
       </APIProvider>
     </div>
   );
 }
 
-export default InteractiveMap;
 

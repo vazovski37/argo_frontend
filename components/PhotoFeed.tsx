@@ -91,49 +91,44 @@ function PhotoCard({ photo }: PhotoCardProps) {
   const photoUrl = photo.url || photo.gcs_url || "";
 
   return (
-    <div className="bg-white/10 backdrop-blur-sm border border-white/20 rounded-2xl overflow-hidden hover:bg-white/15 transition-all">
-      {/* Header */}
-      <div className="p-4 flex items-center gap-3">
-        {/* User Avatar */}
-        {user?.avatar_url ? (
-          <img
-            src={user.avatar_url}
-            alt={user.name || "User"}
-            className="w-10 h-10 rounded-full border-2 border-white/20"
-          />
-        ) : (
-          <div className="w-10 h-10 rounded-full bg-gradient-to-br from-purple-400 to-pink-400 flex items-center justify-center border-2 border-white/20">
-            <span className="text-white font-semibold text-sm">
+    <div className="bg-slate-800 rounded-xl shadow-md overflow-hidden flex flex-col">
+      {/* Header: User Info */}
+      <div className="p-3 flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          {user?.avatar_url ? (
+            <img
+              src={user.avatar_url}
+              alt={user.name || "User"}
+              className="w-8 h-8 rounded-full ring-2 ring-amber-500/50"
+            />
+          ) : (
+            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-amber-500 to-orange-600 flex items-center justify-center text-white text-xs font-bold">
               {user?.name?.[0]?.toUpperCase() || "U"}
-            </span>
+            </div>
+          )}
+          <div>
+            <p className="text-sm font-semibold text-white leading-none">
+              {user?.name || "Traveler"}
+            </p>
+            <p className="text-[10px] text-slate-400 mt-0.5">
+              {photo.uploaded_at ? formatRelativeTime(photo.uploaded_at) : "Just now"}
+            </p>
           </div>
-        )}
-
-        {/* User Name & Timestamp */}
-        <div className="flex-1 min-w-0">
-          <p className="font-semibold text-white truncate">
-            {user?.name || "Unknown User"}
-          </p>
-          <p className="text-xs text-slate-300">
-            {photo.uploaded_at ? formatRelativeTime(photo.uploaded_at) : "Recently"}
-          </p>
         </div>
 
         {/* Visibility Badge */}
         <div
-          className={`flex items-center gap-1 px-2 py-1 rounded-lg border text-xs font-medium ${getVisibilityBadgeColor(
+          className={`flex items-center gap-1 px-2 py-0.5 rounded-full border text-[10px] font-medium ${getVisibilityBadgeColor(
             photo.visibility || "private"
           )}`}
         >
           {getVisibilityIcon(photo.visibility || "private")}
-          <span className="hidden sm:inline">
-            {getVisibilityLabel(photo.visibility || "private")}
-          </span>
+          <span className="capitalize">{photo.visibility || "Private"}</span>
         </div>
       </div>
 
-      {/* Photo */}
-      <div className="relative aspect-square bg-slate-800">
+      {/* Image Container */}
+      <div className="relative aspect-square bg-slate-900">
         {photoUrl ? (
           <img
             src={photoUrl}
@@ -141,27 +136,31 @@ function PhotoCard({ photo }: PhotoCardProps) {
             className="w-full h-full object-cover"
           />
         ) : (
-          <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-purple-900 to-pink-900">
-            <span className="text-4xl">📸</span>
+          <div className="w-full h-full flex items-center justify-center text-slate-700">
+            <span className="text-4xl">📷</span>
           </div>
         )}
-      </div>
 
-      {/* Footer */}
-      <div className="p-4 space-y-2">
-        {/* Caption */}
-        {photo.caption && (
-          <p className="text-sm text-white line-clamp-2">{photo.caption}</p>
-        )}
-
-        {/* Location */}
+        {/* Location Overlay */}
         {location && (
-          <div className="flex items-center gap-2 text-xs text-slate-300">
-            <MapPin className="w-3 h-3 flex-shrink-0" />
-            <span className="truncate">Near {location.name}</span>
+          <div className="absolute bottom-3 left-3 max-w-[80%]">
+            <div className="flex items-center gap-1 px-2 py-1 bg-black/60 backdrop-blur-md rounded-lg text-white text-xs border border-white/10 shadow-lg">
+              <MapPin className="w-3 h-3 text-amber-400" />
+              <span className="truncate font-medium">{location.name}</span>
+            </div>
           </div>
         )}
       </div>
+
+      {/* Footer: Caption */}
+      {photo.caption && (
+        <div className="p-3">
+          <p className="text-sm text-slate-300 leading-relaxed">
+            <span className="font-semibold text-white mr-2">{user?.name}:</span>
+            {photo.caption}
+          </p>
+        </div>
+      )}
     </div>
   );
 }
