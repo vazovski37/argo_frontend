@@ -47,6 +47,7 @@ interface MapDrawerProps {
 export function MapDrawer({ className }: MapDrawerProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [focusedLocationId, setFocusedLocationId] = useState<string | null>(null);
+  const [photoFilter, setPhotoFilter] = useState<"all" | "private" | "group" | "public">("all");
 
   // Open the drawer and focus on a specific location
   const handleOpen = useCallback((locationId: string) => {
@@ -134,11 +135,45 @@ export function MapDrawer({ className }: MapDrawerProps) {
             </div>
           </div>
 
+          {/* Photo Filter Controls */}
+          <div className="px-4 py-2 border-b border-white/10 bg-slate-900/50">
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-slate-400 font-medium">Photos:</span>
+              <div className="flex gap-1 bg-slate-800/50 rounded-lg p-1">
+                {(["all", "private", "group", "public"] as const).map((filter) => (
+                  <button
+                    key={filter}
+                    onClick={() => setPhotoFilter(filter)}
+                    className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
+                      photoFilter === filter
+                        ? "bg-gradient-to-br from-amber-400 to-amber-600 text-white shadow-lg"
+                        : "text-slate-400 hover:text-slate-300 hover:bg-slate-700/50"
+                    }`}
+                    title={
+                      filter === "all"
+                        ? "All photos"
+                        : filter === "private"
+                          ? "My photos only"
+                          : filter === "group"
+                            ? "Group photos"
+                            : "Public photos"
+                    }
+                  >
+                    {filter === "all" && "🌍 All"}
+                    {filter === "private" && "🔒 Mine"}
+                    {filter === "group" && "👥 Groups"}
+                    {filter === "public" && "🌐 Public"}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+
           {/* Map Content */}
           <div className="flex-1 overflow-hidden">
             {isOpen && (
               <div className="h-full w-full">
-                <InteractiveMap focusedLocationId={focusedLocationId} />
+                <InteractiveMap focusedLocationId={focusedLocationId} photoFilter={photoFilter} />
               </div>
             )}
           </div>

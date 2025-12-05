@@ -140,7 +140,7 @@ interface MapContentProps {
 }
 
 // Map Content Component (needs to be inside APIProvider)
-function MapContent({ focusedLocationId, photoFilter = "all" }: MapContentProps & { photoFilter?: string }) {
+function MapContent({ focusedLocationId, photoFilter = "all" }: MapContentProps & { photoFilter?: "all" | "private" | "group" | "public" }) {
   const map = useMap();
   const routesLibrary = useMapsLibrary("routes");
 
@@ -680,7 +680,7 @@ function MapContent({ focusedLocationId, photoFilter = "all" }: MapContentProps 
 export interface InteractiveMapProps {
   focusedLocationId?: string | null;
   className?: string;
-  photoFilter?: "all" | "private" | "group";
+  photoFilter?: "all" | "private" | "group" | "public";
 }
 
 // Main Component
