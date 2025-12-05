@@ -11,7 +11,7 @@ export const LocationSchema = z.object({
   longitude: z.number().nullable().optional(),
   xp_reward: z.number().default(50),
   image_url: z.string().nullable().optional(),
-  metadata: z.record(z.any()).optional(),
+  metadata: z.record(z.string(), z.any()).optional(),
 });
 
 export type Location = z.infer<typeof LocationSchema>;

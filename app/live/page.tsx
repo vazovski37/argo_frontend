@@ -491,16 +491,11 @@ When the user asks to learn Georgian, teach them a phrase and then call learn_ph
     }
   };
 
-  const handlePhotoCapture = useCallback(
-    async (file: File, type: "selfie" | "place" | "food" | "achievement") => {
-      try {
-        await uploadPhotoMutation.mutateAsync({ file, isSelfie: type === "selfie" });
-      } catch (error) {
-        console.error("Error uploading photo:", error);
-      }
-    },
-    [uploadPhotoMutation]
-  );
+  // PhotoCapture handles upload internally, we just need to refresh data on completion
+  const handlePhotoUploadComplete = useCallback(() => {
+    // Invalidate queries to refresh data after photo upload
+    // This is handled automatically by the mutation, but we can add additional logic here if needed
+  }, []);
 
   if (authLoading || progressLoading) {
     return (
@@ -804,7 +799,7 @@ When the user asks to learn Georgian, teach them a phrase and then call learn_ph
                   </svg>
                 </button>
 
-                <PhotoCapture onCapture={handlePhotoCapture} videoStream={mediaStream} isCapturing={false} />
+                <PhotoCapture videoStream={mediaStream} isCapturing={false} onUploadComplete={handlePhotoUploadComplete} />
 
                 <button onClick={handleDisconnect} className="p-4 rounded-2xl bg-red-500 hover:bg-red-600 text-white transition-all duration-300">
                   <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">

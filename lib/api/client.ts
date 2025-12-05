@@ -78,7 +78,7 @@ function validateResponse<T>(
     return { data: validated, status: response.status };
   } catch (error) {
     if (error instanceof z.ZodError) {
-      console.error("[Flask API] Validation error:", error.errors);
+      console.error("[Flask API] Validation error:", error.issues);
       return {
         error: "Invalid response from server",
         status: response.status,

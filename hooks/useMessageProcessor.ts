@@ -158,7 +158,12 @@ export function useMessageProcessor(options: MessageProcessorOptions) {
     xpEarned: number;
     newAchievements: string[];
   }> => {
-    const result = {
+    const result: {
+      visitedLocation?: Location;
+      learnedPhrase?: string;
+      xpEarned: number;
+      newAchievements: string[];
+    } = {
       xpEarned: 0,
       newAchievements: [] as string[],
     };

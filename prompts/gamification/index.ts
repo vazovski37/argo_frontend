@@ -145,9 +145,12 @@ Be creative with photo suggestions:
 }
 
 // Export everything
-export { quests, Quest, QuestStep } from './quests';
-export { achievements, Achievement } from './achievements';
-export { ranks, Rank, getRankForXp, getXpToNextRank } from './ranks';
+export { quests } from './quests';
+export type { Quest, QuestStep } from './quests';
+export { achievements } from './achievements';
+export type { Achievement } from './achievements';
+export { ranks, getRankForXp, getXpToNextRank } from './ranks';
+export type { Rank } from './ranks';
 
 // Default export
 export default buildGamificationPrompt;

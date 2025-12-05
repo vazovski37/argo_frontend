@@ -8,7 +8,7 @@ export const RagResultSchema = z.object({
   content: z.string(),
   source: z.string().nullable(),
   score: z.number(),
-  metadata: z.record(z.unknown()).optional(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
 });
 
 // RAG query response
