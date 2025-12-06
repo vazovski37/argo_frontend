@@ -8,7 +8,7 @@ import dynamic from "next/dynamic";
 
 // Dynamic import to avoid SSR issues
 const InteractiveMap = dynamic(
-  () => import("@/components/InteractiveMap").then((mod) => mod.InteractiveMap),
+  () => import("@/components/features/map/InteractiveMap").then((mod) => mod.InteractiveMap),
   {
     ssr: false,
     loading: () => (

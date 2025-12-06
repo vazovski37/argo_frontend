@@ -1,10 +1,11 @@
 "use client";
 
-import type React from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useRouter } from "next/navigation";
 import { useState, useEffect, useCallback } from "react";
 import Image from "next/image";
+import Link from "next/link";
+import { Button, Input, Card, LoadingSpinner } from "@/components/ui";
 
 declare global {
   interface Window {
@@ -35,18 +36,17 @@ declare global {
 
 const GOOGLE_CLIENT_ID = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || "";
 
-export default function LoginPage() {
+export default function RegisterPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
   const [showEmailForm, setShowEmailForm] = useState(false);
-  const [isRegister, setIsRegister] = useState(false);
+  const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [name, setName] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
 
   const {
     googleLogin,
-    login,
     register,
     isAuthenticated,
     isLoading: authLoading,
@@ -56,7 +56,7 @@ export default function LoginPage() {
   // Redirect if already authenticated
   useEffect(() => {
     if (!authLoading && isAuthenticated) {
-      router.push("/");
+      router.push("/live");
     }
   }, [isAuthenticated, authLoading, router]);
 
@@ -69,9 +69,9 @@ export default function LoginPage() {
       const result = await googleLogin(response.credential);
 
       if (result.success) {
-        router.push("/");
+        router.push("/live");
       } else {
-        setError(result.error || "Google login failed");
+        setError(result.error || "Google sign up failed");
         setIsLoading(false);
       }
     },
@@ -97,7 +97,7 @@ export default function LoginPage() {
           window.google.accounts.id.renderButton(buttonContainer, {
             theme: "filled_blue",
             size: "large",
-            text: "continue_with",
+            text: "signup_with",
             shape: "rectangular",
             width: 320,
           });
@@ -124,14 +124,25 @@ export default function LoginPage() {
     setIsLoading(true);
     setError("");
 
-    const result = isRegister
-      ? await register(email, password, name)
-      : await login(email, password);
+    // Validation
+    if (password !== confirmPassword) {
+      setError("Passwords do not match");
+      setIsLoading(false);
+      return;
+    }
+
+    if (password.length < 6) {
+      setError("Password must be at least 6 characters");
+      setIsLoading(false);
+      return;
+    }
+
+    const result = await register(email, password, name);
 
     if (result.success) {
-      router.push("/");
+      router.push("/live");
     } else {
-      setError(result.error || "Authentication failed");
+      setError(result.error || "Registration failed");
       setIsLoading(false);
     }
   };
@@ -139,14 +150,14 @@ export default function LoginPage() {
   if (authLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-slate-950">
-        <div className="w-8 h-8 border-2 border-sky-400 border-t-transparent rounded-full animate-spin" />
+        <LoadingSpinner size="lg" />
       </div>
     );
   }
 
   return (
     <div className="relative min-h-screen flex items-center justify-center overflow-hidden bg-slate-950">
-      {/* Background image of Poti */}
+      {/* Background image */}
       <div className="absolute inset-0">
         <Image
           src="/potiView.png"
@@ -155,44 +166,37 @@ export default function LoginPage() {
           priority
           className="object-cover"
         />
-        {/* Blue sea overlay */}
         <div className="absolute inset-0 bg-gradient-to-br from-slate-950/85 via-sky-950/80 to-slate-950/90" />
       </div>
 
-      {/* Subtle light beams / overlay accents */}
+      {/* Ambient blobs */}
       <div className="pointer-events-none absolute inset-0">
         <div className="absolute -top-40 -right-32 w-72 h-72 bg-sky-500/25 blur-3xl rounded-full" />
         <div className="absolute -bottom-40 -left-24 w-72 h-72 bg-cyan-400/20 blur-3xl rounded-full" />
-        <div className="absolute top-1/2 left-1/4 w-64 h-64 bg-blue-500/15 blur-3xl rounded-full" />
       </div>
 
       {/* Content */}
-      <div className="relative z-10 w-full max-w-md px-6 py-10">
-        {/* Logo / brand */}
-        <div className="text-center mb-10">
-          <div className="mx-auto mb-5 flex items-center justify-center w-20 h-20 rounded-3xl bg-slate-900/70 border border-sky-500/30 shadow-xl shadow-sky-900/50">
+      <div className="relative z-10 w-full max-w-md px-4 py-8">
+        {/* Logo */}
+        <div className="text-center mb-8">
+          <div className="mx-auto mb-4 flex items-center justify-center w-16 h-16 rounded-2xl bg-slate-900/70 border border-sky-400/40 shadow-xl shadow-sky-900/50">
             <Image
               src="/logo.png"
               alt="Argonauts logo"
-              width={56}
-              height={56}
+              width={48}
+              height={48}
               className="object-contain"
               priority
             />
           </div>
-
-          <h1 className="text-3xl font-semibold text-white tracking-tight">
-            Welcome to Argonauts
-          </h1>
-          <p className="mt-3 text-slate-300 text-sm">
-            {isRegister
-              ? "Create an account to start your journey in Poti."
-              : "Sign in to continue exploring Poti and beyond."}
+          <h1 className="text-2xl font-bold text-white mb-2">Join Argonauts</h1>
+          <p className="text-slate-400 text-sm">
+            Create an account to start your journey in Poti
           </p>
         </div>
 
         {/* Card */}
-        <div className="backdrop-blur-2xl bg-slate-950/70 border border-sky-500/20 rounded-3xl p-8 shadow-2xl shadow-slate-950/80">
+        <Card variant="elevated" className="p-6">
           {error && (
             <div className="mb-4 p-3 rounded-xl bg-red-500/10 border border-red-500/30 text-red-300 text-sm">
               {error}
@@ -201,102 +205,97 @@ export default function LoginPage() {
 
           {!showEmailForm ? (
             <>
-              {/* Google Sign-In Button */}
+              {/* Google Sign-Up */}
               {GOOGLE_CLIENT_ID ? (
-                <div className="flex justify-center mb-4">
-                  <div id="google-signin-button" className="w-full" />
+                <div className="mb-4">
+                  <div id="google-signin-button" className="w-full flex justify-center" />
                 </div>
               ) : (
                 <div className="mb-4 p-3 rounded-xl bg-yellow-500/10 border border-yellow-500/30 text-yellow-200 text-sm text-center">
-                  Google Sign-In not configured
+                  Google Sign-Up not configured
                 </div>
               )}
 
-              {/* Or Divider */}
+              {/* Divider */}
               <div className="relative my-6">
                 <div className="absolute inset-0 flex items-center">
-                  <div className="w-full border-t border-slate-600/60" />
+                  <div className="w-full border-t border-sky-400/20" />
                 </div>
-                <div className="relative flex justify-center text-xs uppercase tracking-[0.2em]">
+                <div className="relative flex justify-center text-xs uppercase tracking-wider">
                   <span className="px-4 bg-slate-950/70 text-slate-400">
-                    Or continue with email
+                    Or sign up with email
                   </span>
                 </div>
               </div>
 
-              {/* Email Login Button */}
-              <button
+              {/* Email Register Button */}
+              <Button
+                variant="primary"
+                fullWidth
                 onClick={() => setShowEmailForm(true)}
                 disabled={isLoading}
-                className="w-full py-3 px-6 bg-sky-500/80 hover:bg-sky-400 text-slate-950 font-medium rounded-2xl transition-all duration-300 border border-sky-300/70 disabled:opacity-60"
               >
                 Continue with Email
-              </button>
+              </Button>
             </>
           ) : (
             <form onSubmit={handleEmailSubmit} className="space-y-4">
-              {isRegister && (
-                <div>
-                  <label className="block text-sm text-slate-300 mb-1">
-                    Name
-                  </label>
-                  <input
-                    type="text"
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    className="w-full px-4 py-3 bg-slate-900/70 border border-slate-600/80 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-sky-500/60"
-                    placeholder="Your name"
-                  />
-                </div>
-              )}
+              <Input
+                label="Name"
+                type="text"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="Your name"
+                required
+                autoFocus
+              />
 
-              <div>
-                <label className="block text-sm text-slate-300 mb-1">
-                  Email
-                </label>
-                <input
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  required
-                  className="w-full px-4 py-3 bg-slate-900/70 border border-slate-600/80 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-sky-500/60"
-                  placeholder="you@example.com"
-                />
-              </div>
+              <Input
+                label="Email"
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="you@example.com"
+                required
+              />
 
-              <div>
-                <label className="block text-sm text-slate-300 mb-1">
-                  Password
-                </label>
-                <input
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  required
-                  minLength={6}
-                  className="w-full px-4 py-3 bg-slate-900/70 border border-slate-600/80 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-sky-500/60"
-                  placeholder="••••••••"
-                />
-              </div>
+              <Input
+                label="Password"
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="••••••••"
+                required
+                minLength={6}
+                helperText="Must be at least 6 characters"
+              />
 
-              <button
+              <Input
+                label="Confirm Password"
+                type="password"
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                placeholder="••••••••"
+                required
+                minLength={6}
+                error={
+                  confirmPassword && password !== confirmPassword
+                    ? "Passwords do not match"
+                    : undefined
+                }
+              />
+
+              <Button
                 type="submit"
-                disabled={isLoading}
-                className="w-full py-3 px-6 bg-gradient-to-r from-sky-500 to-cyan-400 hover:from-sky-400 hover:to-cyan-300 text-slate-950 font-semibold rounded-2xl transition-all duration-300 disabled:opacity-60"
+                variant="primary"
+                fullWidth
+                loading={isLoading}
+                disabled={isLoading || password !== confirmPassword}
               >
-                {isLoading ? (
-                  <span className="flex items-center justify-center gap-2">
-                    <div className="w-4 h-4 border-2 border-slate-900/40 border-t-slate-900 rounded-full animate-spin" />
-                    {isRegister ? "Creating account..." : "Signing in..."}
-                  </span>
-                ) : isRegister ? (
-                  "Create Account"
-                ) : (
-                  "Sign In"
-                )}
-              </button>
+                Create Account
+              </Button>
 
-              <div className="flex items-center justify-between text-sm pt-1">
+              <div className="flex items-center justify-between text-sm pt-2">
                 <button
                   type="button"
                   onClick={() => setShowEmailForm(false)}
@@ -304,44 +303,44 @@ export default function LoginPage() {
                 >
                   ← Back
                 </button>
-                <button
-                  type="button"
-                  onClick={() => setIsRegister(!isRegister)}
-                  className="text-sky-300 hover:text-sky-200 transition-colors"
+                <Link
+                  href="/login"
+                  className="text-sky-400 hover:text-sky-300 transition-colors"
                 >
-                  {isRegister
-                    ? "Already have an account?"
-                    : "Need an account?"}
-                </button>
+                  Already have an account?
+                </Link>
               </div>
             </form>
           )}
 
-          {/* Info */}
+          {/* Terms */}
           <p className="mt-6 text-center text-slate-400 text-xs leading-relaxed">
             By continuing, you agree to our{" "}
             <a
               href="#"
-              className="text-sky-300 hover:text-sky-200 underline-offset-2 hover:underline"
+              className="text-sky-400 hover:text-sky-300 underline-offset-2 hover:underline"
             >
-              Terms of Service
+              Terms
             </a>{" "}
             and{" "}
             <a
               href="#"
-              className="text-sky-300 hover:text-sky-200 underline-offset-2 hover:underline"
+              className="text-sky-400 hover:text-sky-300 underline-offset-2 hover:underline"
             >
               Privacy Policy
             </a>
-            .
           </p>
-        </div>
+        </Card>
 
         {/* Footer */}
         <p className="mt-6 text-center text-slate-400 text-xs">
-          Powered by Flask &amp; Next.js • Made in Poti
+          Already have an account?{" "}
+          <Link href="/login" className="text-sky-400 hover:text-sky-300 font-medium">
+            Sign in
+          </Link>
         </p>
       </div>
     </div>
   );
 }
+

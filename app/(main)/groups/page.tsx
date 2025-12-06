@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useMyGroups, useCreateGroup, useJoinGroup, type Group } from "@/hooks/useGroups";
 import { Users, Plus, Hash, Copy, Check, Loader2, X } from "lucide-react";
-import PhotoFeed from "@/components/PhotoFeed";
+import PhotoFeed from "@/components/features/photo/PhotoFeed";
 
 export default function GroupsPage() {
   const [showCreateModal, setShowCreateModal] = useState(false);

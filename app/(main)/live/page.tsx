@@ -15,11 +15,11 @@ import { useLearnPhrase } from "@/hooks/mutations/useLearnPhrase";
 import { useStartQuest } from "@/hooks/mutations/useQuestMutations";
 import { useUploadPhoto } from "@/hooks/mutations/usePhotoMutations";
 import { useMessageProcessor } from "@/hooks/useMessageProcessor";
-import { GameProgressBar } from "@/components/GameProgressBar";
-import { PhotoCapture } from "@/components/PhotoCapture";
-import { AchievementToast } from "@/components/AchievementToast";
-import { GameActions } from "@/components/GameActions";
-import { MapDrawer, mapDrawerController } from "@/components/MapDrawer";
+import { GameProgressBar } from "@/components/features/game";
+import { PhotoCapture } from "@/components/features/photo";
+import { AchievementToast } from "@/components/features/game";
+import { GameActions } from "@/components/features/game";
+import { MapDrawer, mapDrawerController } from "@/components/features/map";
 import Link from "next/link";
 
 const GEMINI_API_KEY = process.env.NEXT_PUBLIC_GEMINI_API_KEY || "";

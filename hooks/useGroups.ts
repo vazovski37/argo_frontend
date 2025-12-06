@@ -41,6 +41,33 @@ export interface JoinGroupResponse {
   message: string;
 }
 
+export interface GroupDetail extends Group {
+  is_member?: boolean;
+  is_owner?: boolean;
+}
+
+export interface GroupDetailResponse {
+  group: GroupDetail;
+}
+
+export interface GroupMember {
+  id: string;
+  user_id: string;
+  group_id: string;
+  joined_at: string;
+  user?: {
+    id: string;
+    name: string;
+    email: string;
+    avatar_url?: string;
+  };
+}
+
+export interface GroupMembersResponse {
+  members: GroupMember[];
+  total: number;
+}
+
 // API functions
 async function fetchMyGroups(): Promise<GroupsResponse> {
   const response = await fetch("/api/groups/my-groups");
@@ -89,6 +116,28 @@ async function joinGroup(input: JoinGroupInput): Promise<JoinGroupResponse> {
   return data;
 }
 
+async function fetchGroupDetail(groupId: string): Promise<GroupDetailResponse> {
+  const response = await fetch(`/api/groups/${groupId}`);
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.error || "Failed to fetch group");
+  }
+
+  return response.json();
+}
+
+async function fetchGroupMembers(groupId: string): Promise<GroupMembersResponse> {
+  const response = await fetch(`/api/groups/${groupId}/members`);
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.error || "Failed to fetch group members");
+  }
+
+  return response.json();
+}
+
 // Hooks
 export function useMyGroups(enabled = true) {
   return useQuery({
@@ -118,6 +167,24 @@ export function useJoinGroup() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.groups.all });
     },
+  });
+}
+
+export function useGroupDetail(groupId: string, enabled = true) {
+  return useQuery({
+    queryKey: queryKeys.groups.detail(groupId),
+    queryFn: () => fetchGroupDetail(groupId),
+    enabled: enabled && !!groupId,
+    staleTime: 60 * 1000, // 1 minute
+  });
+}
+
+export function useGroupMembers(groupId: string, enabled = true) {
+  return useQuery({
+    queryKey: queryKeys.groups.members(groupId),
+    queryFn: () => fetchGroupMembers(groupId),
+    enabled: enabled && !!groupId,
+    staleTime: 60 * 1000, // 1 minute
   });
 }
 
